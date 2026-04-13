@@ -16,6 +16,7 @@
         <div class="header-actions">
           <span id="mode-indicator" class="count-pill">Mode: Live</span>
           <button id="open-library-btn" class="btn btn-accent" type="button">Open Ingredient Library</button>
+          <button id="weekly-review-nav-btn" class="btn" type="button">Weekly Review</button>
           <button id="new-recipe-btn" class="btn btn-secondary" type="button">New Recipe</button>
         </div>
       </header>
@@ -40,6 +41,77 @@
           <button id="copy-summary-btn" class="btn" type="button">Copy Text Summary</button>
         </div>
         <div id="snapshot-feedback" class="inline-errors" aria-live="polite"></div>
+      </section>
+
+
+
+      <section id="weekly-review-section" class="card dashboard-block weekly-review-block">
+        <div class="panel-head"><h2>Weekly Review</h2><span id="weekly-review-status" class="count-pill">Not started</span></div>
+        <div class="weekly-step-indicator" id="weekly-step-indicator"></div>
+        <div id="weekly-review-feedback" class="inline-errors" aria-live="polite"></div>
+
+        <div class="weekly-step" data-weekly-step="1">
+          <h3>Step 1 — Start Review</h3>
+          <div class="field-grid two-col">
+            <label class="field"><span>Review Name</span><input id="weekly-review-name" type="text" /></label>
+            <label class="field"><span>Start Notes (optional)</span><input id="weekly-review-notes" type="text" placeholder="Context for this week" /></label>
+          </div>
+          <div id="weekly-last-review" class="card-light"></div>
+          <div class="button-row"><button id="weekly-start-btn" class="btn btn-accent" type="button">Start Review</button></div>
+        </div>
+
+        <div class="weekly-step" data-weekly-step="2">
+          <h3>Step 2 — Data Check</h3>
+          <ul id="weekly-data-check-list"></ul>
+          <div class="button-row"><button id="weekly-continue-data-btn" class="btn" type="button">Continue</button></div>
+        </div>
+
+        <div class="weekly-step" data-weekly-step="3">
+          <h3>Step 3 — Snapshot</h3>
+          <p class="helper-text">Create a dedicated snapshot for this weekly review.</p>
+          <div class="button-row"><button id="weekly-create-snapshot-btn" class="btn btn-accent" type="button">Create Snapshot & Continue</button><button id="weekly-auto-snapshot-btn" class="btn btn-secondary" type="button">Auto-Create on Continue</button></div>
+        </div>
+
+        <div class="weekly-step" data-weekly-step="4">
+          <h3>Step 4 — Comparison</h3>
+          <div id="weekly-comparison-summary" class="card-light"></div>
+          <div class="field-grid two-col">
+            <label class="field"><span>What improved?</span><input id="weekly-improved-note" type="text" /></label>
+            <label class="field"><span>What declined?</span><input id="weekly-declined-note" type="text" /></label>
+          </div>
+          <label class="field"><span>Comparison Notes (optional)</span><input id="weekly-comparison-notes" type="text" /></label>
+          <div class="button-row"><button id="weekly-continue-comparison-btn" class="btn" type="button">Continue</button></div>
+        </div>
+
+        <div class="weekly-step" data-weekly-step="5">
+          <h3>Step 5 — Focus Item Selector</h3>
+          <div id="weekly-focus-list" class="weekly-focus-list"></div>
+          <div class="button-row"><button id="weekly-continue-focus-btn" class="btn" type="button">Continue</button></div>
+        </div>
+
+        <div class="weekly-step" data-weekly-step="6">
+          <h3>Step 6 — Decision Panel</h3>
+          <div id="weekly-decisions-list" class="weekly-decisions-list"></div>
+          <div class="button-row"><button id="weekly-continue-decisions-btn" class="btn" type="button">Continue</button></div>
+        </div>
+
+        <div class="weekly-step" data-weekly-step="7">
+          <h3>Step 7 — Review Summary</h3>
+          <pre id="weekly-summary-output"></pre>
+          <div class="button-row"><button id="weekly-continue-summary-btn" class="btn" type="button">Continue</button></div>
+        </div>
+
+        <div class="weekly-step" data-weekly-step="8">
+          <h3>Step 8 — Save Review</h3>
+          <p class="helper-text">This saves the review log to localStorage.</p>
+          <div class="button-row"><button id="weekly-save-btn" class="btn btn-accent" type="button">Save Weekly Review</button></div>
+        </div>
+
+        <div class="weekly-step" data-weekly-step="9">
+          <h3>Step 9 — Next Week Loop</h3>
+          <div id="weekly-evaluation-list" class="weekly-evaluation-list"></div>
+          <div class="button-row"><button id="weekly-finish-btn" class="btn" type="button">Finish Review Cycle</button></div>
+        </div>
       </section>
 
       <main class="workspace-grid">

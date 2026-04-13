@@ -40,3 +40,18 @@ input,select,button{font:inherit}input,select{width:100%;background:#0c1323;colo
   .print-summary-sheet pre{border-color:#bbb;background:#fff;color:#111}
   th,td{border-color:#ddd;color:#111}
 }
+
+.weekly-review-block{margin-top:1rem}
+.weekly-step-indicator{display:flex;flex-wrap:wrap;gap:.4rem;margin:.4rem 0 .8rem}
+.weekly-step-chip{padding:.2rem .55rem;border:1px solid var(--line);border-radius:999px;background:#0f1729;color:var(--muted);font-size:.75rem}
+.weekly-step-chip.active{border-color:#5f9bda;color:#d8ebff;background:#1a2d49}
+.weekly-step{display:none;border-top:1px dashed var(--line);padding-top:.8rem;margin-top:.8rem}
+.weekly-step.active{display:block}
+.weekly-focus-list,.weekly-decisions-list,.weekly-evaluation-list{display:grid;gap:.55rem}
+.weekly-focus-item,.weekly-decision-item,.weekly-eval-item{border:1px solid var(--line);border-radius:10px;background:#0f1729;padding:.55rem}
+.weekly-metrics{display:flex;flex-wrap:wrap;gap:.4rem;color:var(--muted);font-size:.78rem;margin-top:.2rem}
+#weekly-summary-output{white-space:pre-wrap;background:#0f1729;border:1px solid var(--line);border-radius:10px;padding:.7rem;min-height:120px}
+
+@media (max-width: 920px){
+  .field-grid.two-col{grid-template-columns:1fr}
+}
