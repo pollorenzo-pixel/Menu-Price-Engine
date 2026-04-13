@@ -1,987 +1,591 @@
-const STORAGE_VERSION = 4;
 const STORAGE_KEYS = {
-  ingredients: 'mpe_v4_ingredients', recipes: 'mpe_v4_recipes', draft: 'mpe_v4_active_draft', seeded: 'mpe_v4_seeded',
-  snapshots: 'mpe_v4_snapshots', weeklyReviews: 'mpe_v4_weekly_reviews', weeklyDraft: 'mpe_v4_weekly_draft', prefs: 'mpe_v4_prefs', compareNotes: 'mpe_v4_compare_notes',
-  legacyIngredients: 'mpe_v3_ingredients', legacyRecipes: 'mpe_v3_recipes', legacyDraft: 'mpe_v3_active_draft', legacySeeded: 'mpe_v3_seeded',
+  ingredients: 'mpe_v5_ingredients',
+  recipes: 'mpe_v5_recipes',
+  dishes: 'mpe_v5_dishes',
+  snapshots: 'mpe_v5_snapshots',
+  weeklyReviews: 'mpe_v5_weekly_reviews',
+  legacyIngredients: 'mpe_v4_ingredients',
+  legacyRecipes: 'mpe_v4_recipes',
+  legacySnapshots: 'mpe_v4_snapshots',
+  legacyWeekly: 'mpe_v4_weekly_reviews',
 };
-const PACK_UNITS = ['g', 'kg', 'ml', 'l', 'unit'];
-const UNIT_GROUP = { g: 'weight', kg: 'weight', ml: 'volume', l: 'volume', unit: 'count' };
-const BASE_FACTOR = { g: 1, kg: 1000, ml: 1, l: 1000, unit: 1 };
+
+const UNITS = ['g', 'kg', 'ml', 'l', 'unit'];
+const UNIT_GROUP = { g: 'w', kg: 'w', ml: 'v', l: 'v', unit: 'c' };
+const UNIT_FACTOR = { g: 1, kg: 1000, ml: 1, l: 1000, unit: 1 };
 
 const $ = (id) => document.getElementById(id);
-const uid = (p) => `${p}_${Math.random().toString(36).slice(2, 9)}_${Date.now().toString(36)}`;
-const nowIso = () => new Date().toISOString();
-const cleanText = (v) => String(v ?? '').trim();
-const toNumber = (v, f = 0) => Number.isFinite(Number(v)) ? Number(v) : f;
-const safeLower = (v) => cleanText(v).toLowerCase();
-const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
-const fmtCurrency = (v) => new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP' }).format(toNumber(v, 0));
-const fmtPercent = (v) => `${toNumber(v, 0).toFixed(2)}%`;
-const fmtInt = (v) => Math.round(toNumber(v, 0)).toLocaleString('en-GB');
-const shortDateTime = (iso) => new Date(iso).toLocaleString();
+const uid = (p) => `${p}_${Math.random().toString(36).slice(2, 9)}`;
+const now = () => new Date().toISOString();
+const n = (v, f = 0) => (Number.isFinite(Number(v)) ? Number(v) : f);
+const t = (v) => String(v ?? '').trim();
+const money = (v) => new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP' }).format(n(v));
 
 const state = {
-  ingredients: [], recipes: [], snapshots: [], draft: null,
-  activeRecipeId: null, ingredientEditingId: null,
-  recipeSearch: '', recipeStatusFilter: 'all', ingredientSearch: '', analysisSearch: '', analysisClassFilter: 'all',
-  compareSearch: '', compareMovementFilter: 'all',
-  sort: { key: 'name', dir: 'asc' }, csort: { key: 'revenueChange', dir: 'desc' },
-  prefs: { foodCostFlagTarget: 32, lowUnitsThreshold: 25 },
-  menuEngine: null, comparison: null, currentMode: 'home',
-  weeklyReviews: [], weeklyReview: { step: 1, started: false, name: '', notes: '', snapshotId: '', focusItemIds: [], decisions: [], comparisonNotes: '', improvedNote: '', declinedNote: '', previousEvaluation: [] },
+  ingredients: [],
+  recipes: [],
+  dishes: [],
+  snapshots: [],
+  weeklyReviews: [],
+  editIngredientId: null,
+  editRecipeId: null,
+  editDishId: null,
+  mode: 'home',
 };
 
-const WEEKLY_STEPS = [
-  'Start', 'Data Check', 'Snapshot', 'Comparison', 'Focus', 'Decisions', 'Summary', 'Save', 'Follow-up',
-];
-
-const dom = {
-  appShell: document.querySelector('.app-shell'),
-  modeNav: $('mode-nav'),
-  recipeList: $('recipe-list'), recipeCount: $('recipe-count'), recipeSearch: $('recipe-search'), recipeStatusFilter: $('recipe-status-filter'),
-  ingredientRows: $('ingredient-rows'), template: $('ingredient-row-template'),
-  editorErrors: $('editor-errors'), calcWarnings: $('calc-warnings'), draftState: $('draft-state'),
-  insightList: $('insight-list'), itemFlagList: $('item-flag-list'), periodLabel: $('period-label'), modeIndicator: $('mode-indicator'),
-  modeTabs: [...document.querySelectorAll('[data-mode]')], modePanels: [...document.querySelectorAll('[data-mode-panel]')], modeJumpButtons: [...document.querySelectorAll('[data-open-mode]')],
-  activeModeTitle: $('active-mode-title'), activeModeDescription: $('active-mode-description'),
-  homeKpiCards: $('home-kpi-cards'), homeAttentionList: $('home-attention-list'), homeSummaryList: $('home-summary-list'),
-  analysisSearch: $('analysis-search'), analysisClassFilter: $('analysis-class-filter'), analysisTable: $('analysis-table'), analysisBody: $('analysis-body'),
-  dashboardCards: $('dashboard-cards'), menuInsightList: $('menu-insight-list'), priorityList: $('priority-list'), snapshotList: $('snapshot-list'), comparisonSummary: $('comparison-summary'),
-  reviewSummaryOutput: $('review-summary-output'),
-  matrixChart: $('matrix-chart'), matrixFallback: $('matrix-fallback'),
-  compareSearch: $('compare-search'), compareMovementFilter: $('compare-movement-filter'), comparisonTable: $('comparison-table'), comparisonBody: $('comparison-body'),
-  snapshotName: $('snapshot-name'), snapshotPeriod: $('snapshot-period'), snapshotNotes: $('snapshot-notes'), snapshotFeedback: $('snapshot-feedback'),
-  compareLeft: $('compare-left'), compareRight: $('compare-right'), comparisonNotes: $('comparison-notes'),
-  actions: {
-    openLib: $('open-library-btn'), closeLib: $('close-library-btn'), newRecipe: $('new-recipe-btn'), addRow: $('add-row-btn'),
-    save: $('save-recipe-btn'), update: $('update-recipe-btn'), duplicate: $('duplicate-recipe-btn'), del: $('delete-recipe-btn'), reset: $('reset-form-btn'),
-    createSnapshot: $('create-snapshot-btn'), runCompare: $('run-compare-btn'), clearCompare: $('clear-compare-btn'),
-    exportCurrentCsv: $('export-current-csv-btn'), exportCompareCsv: $('export-compare-csv-btn'), printSummary: $('print-summary-btn'), copySummary: $('copy-summary-btn'),
-  },
-  results: {
-    totalIngredient: $('res-total-ingredient'), totalPortion: $('res-total-portion'), rounded: $('res-rounded'), gross: $('res-gross'), foodRounded: $('res-food-rounded'),
-    totalRevenue: $('res-total-revenue'), totalGrossProfit: $('res-total-gross-profit'), classification: $('res-classification'), action: $('res-action'),
-  },
-  fields: {
-    name: $('recipe-name'), category: $('recipe-category'), portions: $('portions-yielded'), target: $('target-food-cost'), packaging: $('packaging-cost'), labour: $('labour-cost'),
-    vat: $('vat-rate'), delivery: $('delivery-commission'), rounding: $('rounding-rule'), manual: $('manual-price'), sellingPrice: $('selling-price'), unitsSold: $('units-sold'),
-    reportingPeriod: $('reporting-period'), internalScore: $('internal-score'), isActive: $('is-active'), revenueOverride: $('revenue-override'), itemNotes: $('item-notes'),
-  },
-  weekly: {
-    section: $('weekly-review-section'), status: $('weekly-review-status'), feedback: $('weekly-review-feedback'), stepIndicator: $('weekly-step-indicator'),
-    steps: [...document.querySelectorAll('[data-weekly-step]')], navBtn: $('weekly-review-nav-btn'),
-    name: $('weekly-review-name'), notes: $('weekly-review-notes'), lastReview: $('weekly-last-review'), startBtn: $('weekly-start-btn'),
-    dataCheckList: $('weekly-data-check-list'), continueDataBtn: $('weekly-continue-data-btn'),
-    createSnapshotBtn: $('weekly-create-snapshot-btn'), autoSnapshotBtn: $('weekly-auto-snapshot-btn'),
-    comparisonSummary: $('weekly-comparison-summary'), improvedNote: $('weekly-improved-note'), declinedNote: $('weekly-declined-note'), comparisonNotes: $('weekly-comparison-notes'), continueComparisonBtn: $('weekly-continue-comparison-btn'),
-    focusList: $('weekly-focus-list'), continueFocusBtn: $('weekly-continue-focus-btn'),
-    decisionsList: $('weekly-decisions-list'), continueDecisionsBtn: $('weekly-continue-decisions-btn'),
-    summaryOutput: $('weekly-summary-output'), continueSummaryBtn: $('weekly-continue-summary-btn'),
-    saveBtn: $('weekly-save-btn'), evaluationList: $('weekly-evaluation-list'), finishBtn: $('weekly-finish-btn'),
-  },
-  library: {
-    modal: $('library-modal'), errors: $('library-errors'), count: $('ingredient-count'), body: $('ingredient-library-body'), search: $('ingredient-search'),
-    name: $('lib-name'), price: $('lib-price'), packSize: $('lib-pack-size'), packUnit: $('lib-pack-unit'), supplier: $('lib-supplier'), notes: $('lib-notes'),
-    add: $('add-ingredient-btn'), update: $('update-ingredient-btn'), clear: $('clear-ingredient-form-btn'),
-  },
-};
-
-
-const MODE_META = {
-  home: { title: 'Home / Command Center', description: 'Track key menu performance and choose your next action.' },
-  recipes: { title: 'Recipes & Costing', description: 'Build recipes, update ingredient rows, and manage pricing calculations.' },
-  analysis: { title: 'Menu Analysis', description: 'Review classifications, matrix position, and recommended actions.' },
-  reports: { title: 'Reports & Snapshots', description: 'Create snapshots, compare periods, and export summary reporting.' },
-  weekly: { title: 'Weekly Review', description: 'Run the guided weekly ritual and capture decisions.' },
-  ingredients: { title: 'Ingredient Library', description: 'Manage ingredient costs and supplier details in one place.' },
-};
-
-function switchMode(mode) {
-  if (!MODE_META[mode]) return;
-  if (state.currentMode === mode && dom.modePanels.some((panel) => panel.dataset.modePanel === mode && panel.classList.contains('active'))) return;
-  state.currentMode = mode;
-  dom.modeTabs.forEach((tab) => {
-    const isActive = tab.dataset.mode === mode;
-    tab.classList.toggle('active', isActive);
-    tab.setAttribute('aria-pressed', isActive ? 'true' : 'false');
-    if (isActive) tab.setAttribute('aria-current', 'page');
-    else tab.removeAttribute('aria-current');
-  });
-  dom.modePanels.forEach((panel) => {
-    const isActive = panel.dataset.modePanel === mode;
-    panel.classList.toggle('active', isActive);
-    panel.hidden = !isActive;
-    panel.setAttribute('aria-hidden', isActive ? 'false' : 'true');
-    panel.inert = !isActive;
-  });
-  dom.appShell.classList.toggle('home-mode', mode === 'home');
-  dom.activeModeTitle.textContent = MODE_META[mode].title;
-  dom.activeModeDescription.textContent = MODE_META[mode].description;
-  const compareSuffix = state.comparison ? ` · Comparison: ${state.comparison.leftLabel} → ${state.comparison.rightLabel}` : ' · Live';
-  dom.modeIndicator.textContent = `Mode: ${MODE_META[mode].title}${compareSuffix}`;
-}
-
-function bindModeEvents() {
-  dom.modeNav.addEventListener('click', (e) => {
-    const tab = e.target.closest('[data-mode]');
-    if (!tab) return;
-    switchMode(tab.dataset.mode);
-  });
-  dom.appShell.addEventListener('click', (e) => {
-    const btn = e.target.closest('[data-open-mode]');
-    if (!btn) return;
-    switchMode(btn.dataset.openMode);
-  });
-}
-
-function setInlineMessage(el, message, type = 'warn') { el.textContent = message || ''; el.classList.toggle('success', type === 'success'); }
-function safeParse(raw, fallback) { try { const v = JSON.parse(raw); return v ?? fallback; } catch { return fallback; } }
-function getStoredArray(k) { const v = safeParse(localStorage.getItem(k), []); return Array.isArray(v) ? v : []; }
-function getStoredObject(k, f = {}) { const v = safeParse(localStorage.getItem(k), f); return v && typeof v === 'object' ? v : f; }
-function setStored(k, v) { localStorage.setItem(k, JSON.stringify(v)); }
-
-function defaultIngredientRow() { return { rowId: uid('row'), ingredientId: '', ingredientNameSnapshot: '', purchasePriceSnapshot: 0, packSizeSnapshot: 1, packUnitSnapshot: 'g', amountUsed: 0, useUnit: 'g', calculatedCostUsed: 0 }; }
-function defaultRecipe() {
-  return {
-    id: null, name: '', category: '', portionsYielded: 10, packagingCostPerPortion: 0, labourCostPerPortion: 0,
-    targetFoodCostPercent: 30, vatRatePercent: 20, deliveryCommissionPercent: 30, roundingRule: 0.25, manualMenuPrice: '',
-    ingredientRows: [defaultIngredientRow()], sellingPrice: 0, unitsSold: 0, reportingPeriod: 'Last 30 Days', internalScore: '', isActive: true,
-    revenueOverride: '', itemNotes: '', createdAt: null, updatedAt: null, storageVersion: STORAGE_VERSION,
-  };
-}
-function convertUnit(value, fromUnit, toUnit) {
-  if (!fromUnit || !toUnit || UNIT_GROUP[fromUnit] !== UNIT_GROUP[toUnit]) return { ok: false, value: 0 };
-  return { ok: true, value: (value * BASE_FACTOR[fromUnit]) / BASE_FACTOR[toUnit] };
-}
-
-function migrateIngredient(raw) {
-  return { id: cleanText(raw?.id) || uid('ing'), name: cleanText(raw?.name), purchasePrice: Math.max(0, toNumber(raw?.purchasePrice)), packSize: Math.max(0.0001, toNumber(raw?.packSize, 1)), packUnit: PACK_UNITS.includes(raw?.packUnit) ? raw.packUnit : 'g', supplier: cleanText(raw?.supplier), notes: cleanText(raw?.notes) };
-}
-function migrateRow(raw) {
-  return { rowId: cleanText(raw?.rowId) || uid('row'), ingredientId: cleanText(raw?.ingredientId), ingredientNameSnapshot: cleanText(raw?.ingredientNameSnapshot ?? raw?.name), purchasePriceSnapshot: Math.max(0, toNumber(raw?.purchasePriceSnapshot ?? raw?.purchasePrice)), packSizeSnapshot: Math.max(0.0001, toNumber(raw?.packSizeSnapshot ?? raw?.packSize, 1)), packUnitSnapshot: PACK_UNITS.includes(raw?.packUnitSnapshot ?? raw?.packUnit) ? (raw?.packUnitSnapshot ?? raw?.packUnit) : 'g', amountUsed: Math.max(0, toNumber(raw?.amountUsed)), useUnit: PACK_UNITS.includes(raw?.useUnit) ? raw.useUnit : 'g', calculatedCostUsed: Math.max(0, toNumber(raw?.calculatedCostUsed)) };
-}
-function migrateRecipe(raw) {
-  const seeded = { ...defaultRecipe(), ...raw };
-  return {
-    ...seeded, id: cleanText(raw?.id) || uid('rec'), name: cleanText(raw?.name), category: cleanText(raw?.category),
-    portionsYielded: Math.max(0.01, toNumber(raw?.portionsYielded ?? raw?.servings, 10)),
-    packagingCostPerPortion: Math.max(0, toNumber(raw?.packagingCostPerPortion ?? raw?.packagingCost)), labourCostPerPortion: Math.max(0, toNumber(raw?.labourCostPerPortion ?? raw?.laborCostPerPortion ?? raw?.labourCost)),
-    targetFoodCostPercent: clamp(toNumber(raw?.targetFoodCostPercent ?? raw?.targetFoodCost, 30), 0.01, 99.99), vatRatePercent: Math.max(0, toNumber(raw?.vatRatePercent, 20)),
-    deliveryCommissionPercent: Math.max(0, toNumber(raw?.deliveryCommissionPercent, 30)), roundingRule: toNumber(raw?.roundingRule, 0.25) || 0.25,
-    manualMenuPrice: raw?.manualMenuPrice === '' ? '' : Math.max(0, toNumber(raw?.manualMenuPrice ?? raw?.menuPrice, 0)),
-    sellingPrice: Math.max(0, toNumber(raw?.sellingPrice ?? raw?.currentSellingPrice ?? raw?.priceSoldAt, 0)), unitsSold: Math.max(0, Math.round(toNumber(raw?.unitsSold ?? raw?.salesUnits ?? raw?.qtySold, 0))),
-    reportingPeriod: cleanText(raw?.reportingPeriod || 'Last 30 Days'), internalScore: raw?.internalScore === '' ? '' : clamp(toNumber(raw?.internalScore, 0), 0, 10),
-    isActive: typeof raw?.isActive === 'boolean' ? raw.isActive : true, revenueOverride: raw?.revenueOverride === '' ? '' : toNumber(raw?.revenueOverride, 0), itemNotes: cleanText(raw?.itemNotes),
-    ingredientRows: Array.isArray(raw?.ingredientRows) && raw.ingredientRows.length ? raw.ingredientRows.map(migrateRow) : [defaultIngredientRow()], createdAt: cleanText(raw?.createdAt) || nowIso(), updatedAt: cleanText(raw?.updatedAt) || nowIso(), storageVersion: STORAGE_VERSION,
-  };
-}
-
-function calculateRowCost(row) {
-  const c = convertUnit(Math.max(0, toNumber(row.amountUsed)), row.useUnit, row.packUnitSnapshot);
-  if (!c.ok) return { cost: 0, warning: `Cannot convert ${row.useUnit} to ${row.packUnitSnapshot}` };
-  return { cost: (Math.max(0, toNumber(row.purchasePriceSnapshot)) / Math.max(0.0001, toNumber(row.packSizeSnapshot, 1))) * c.value, warning: '' };
-}
-function roundToRule(value, rule = 0.25) { return value > 0 ? Math.round(value / rule) * rule : 0; }
-function calculateRecipeMetrics(recipe, options = {}) {
-  const warnings = []; let totalIngredientCost = 0;
-  const ingredientRows = (recipe.ingredientRows || []).map((r) => {
-    const calc = calculateRowCost(r); totalIngredientCost += calc.cost; if (calc.warning && !options.suppressWarnings) warnings.push(calc.warning); return { ...r, calculatedCostUsed: calc.cost };
-  });
-  const portions = Math.max(0.01, toNumber(recipe.portionsYielded, 10));
-  const ingredientCostPerPortion = totalIngredientCost / portions;
-  const totalCostPerPortionExclLabour = ingredientCostPerPortion + Math.max(0, toNumber(recipe.packagingCostPerPortion));
-  const totalCostPerPortionInclLabour = totalCostPerPortionExclLabour + Math.max(0, toNumber(recipe.labourCostPerPortion));
-  const suggestedNetSellingPrice = totalCostPerPortionExclLabour / (Math.max(0.01, toNumber(recipe.targetFoodCostPercent, 30)) / 100);
-  const roundedSellingPrice = roundToRule(suggestedNetSellingPrice, toNumber(recipe.roundingRule, 0.25));
-  const effectiveMenuPrice = Math.max(0, toNumber(recipe.sellingPrice, 0)) || (recipe.manualMenuPrice === '' ? roundedSellingPrice : Math.max(0, toNumber(recipe.manualMenuPrice, roundedSellingPrice)));
-  const foodCostPercent = effectiveMenuPrice > 0 ? (totalCostPerPortionExclLabour / effectiveMenuPrice) * 100 : 0;
-  const grossProfitPerPortion = effectiveMenuPrice - totalCostPerPortionExclLabour;
-  const unitsSold = Math.max(0, toNumber(recipe.unitsSold, 0));
-  const computedRevenue = effectiveMenuPrice * unitsSold;
-  const revenue = recipe.revenueOverride === '' ? computedRevenue : Math.max(0, toNumber(recipe.revenueOverride, computedRevenue));
-  const totalGrossProfit = revenue - (totalCostPerPortionExclLabour * unitsSold);
-  return { ...recipe, ingredientRows, totalIngredientCost, ingredientCostPerPortion, totalCostPerPortionExclLabour, totalCostPerPortionInclLabour, suggestedNetSellingPrice, roundedSellingPrice, effectiveMenuPrice, foodCostPercent, grossProfitPerPortion, unitsSold, revenue, totalGrossProfit, warnings };
-}
-
-function classifyMenuItems(items) {
-  const active = items.filter((i) => i.isActive);
-  if (active.length < 2) return { items: items.map((i) => ({ ...i, classification: i.isActive ? 'Unclassified' : 'Inactive' })), averages: { unitsSold: 0, grossProfitPerPortion: 0 }, fallback: 'Need at least 2 active items for classification.' };
-  const avgUnits = active.reduce((s, i) => s + i.unitsSold, 0) / active.length;
-  const avgGross = active.reduce((s, i) => s + i.grossProfitPerPortion, 0) / active.length;
-  return {
-    averages: { unitsSold: avgUnits, grossProfitPerPortion: avgGross }, fallback: '',
-    items: items.map((i) => {
-      if (!i.isActive) return { ...i, classification: 'Inactive' };
-      const hp = i.unitsSold >= avgUnits; const hgp = i.grossProfitPerPortion >= avgGross;
-      const c = hp && hgp ? 'Star' : hp ? 'Plowhorse' : hgp ? 'Puzzle' : 'Dog';
-      return { ...i, classification: c };
-    }),
-  };
-}
-
-function getItemFlags(item) {
-  const f = [];
-  if (item.foodCostPercent > state.prefs.foodCostFlagTarget) f.push('Food cost above target');
-  if (item.effectiveMenuPrice < item.roundedSellingPrice) f.push('Priced below recommendation');
-  if (item.unitsSold > state.prefs.lowUnitsThreshold && item.grossProfitPerPortion < 1.5) f.push('High sales, weak margin');
-  if (item.unitsSold <= state.prefs.lowUnitsThreshold && item.grossProfitPerPortion >= 2) f.push('Low sales, strong profit');
-  if (item.classification === 'Dog') f.push('Dog classification');
-  if (item.grossProfitPerPortion <= 0.15) f.push('Negative/near-zero margin');
-  if (!item.isActive) f.push('Inactive item');
-  return f;
-}
-function recommendedAction(item) {
-  if (item.grossProfitPerPortion <= 0.15) return 'Review recipe cost and reprice urgently';
-  if (item.foodCostPercent > state.prefs.foodCostFlagTarget) return 'Raise price carefully or reduce ingredient cost';
-  if (item.classification === 'Puzzle') return 'Improve menu placement and promotion';
-  if (item.classification === 'Plowhorse') return 'Test small price lift (0.25-0.50)';
-  if (item.classification === 'Dog') return 'Consider redesign or removal after test';
-  return 'Maintain positioning and monitor';
-}
-function scorePriority(item, flag) {
-  let score = 0;
-  if (item.grossProfitPerPortion <= 0.15) score += 140;
-  if (item.classification === 'Dog') score += 85;
-  if (item.foodCostPercent > state.prefs.foodCostFlagTarget) score += 65;
-  if (item.effectiveMenuPrice < item.roundedSellingPrice) score += 40;
-  if (flag.includes('High sales')) score += 35;
-  if (flag.includes('Low sales')) score -= 10;
-  score += Math.max(0, item.unitsSold * 0.08);
-  score += Math.max(0, item.totalGrossProfit < 0 ? 45 : 0);
-  return Math.round(score);
-}
-
-function totalsFromItems(items) {
-  const active = items.filter((i) => i.isActive);
-  return {
-    activeItems: active.length, totalUnits: active.reduce((s, i) => s + i.unitsSold, 0), totalRevenue: active.reduce((s, i) => s + i.revenue, 0),
-    totalGrossProfit: active.reduce((s, i) => s + i.totalGrossProfit, 0), avgSellingPrice: active.length ? active.reduce((s, i) => s + i.effectiveMenuPrice, 0) / active.length : 0,
-    avgGrossProfitPerPortion: active.length ? active.reduce((s, i) => s + i.grossProfitPerPortion, 0) / active.length : 0,
-    avgFoodCostPercent: active.length ? active.reduce((s, i) => s + i.foodCostPercent, 0) / active.length : 0,
-    stars: active.filter((i) => i.classification === 'Star').length, plowhorses: active.filter((i) => i.classification === 'Plowhorse').length,
-    puzzles: active.filter((i) => i.classification === 'Puzzle').length, dogs: active.filter((i) => i.classification === 'Dog').length,
-  };
-}
-
-function snapshotFromItems(name, periodLabel, notes, sourceLabel = 'live') {
-  const metrics = state.recipes.map((r) => calculateRecipeMetrics(r, { suppressWarnings: true }));
-  const classified = classifyMenuItems(metrics).items.map((i) => ({ ...i, flags: getItemFlags(i), action: recommendedAction(i) }));
-  return {
-    id: uid('snap'),
-    name,
-    periodLabel: periodLabel || 'Unspecified',
-    notes: notes || '',
-    sourceLabel,
-    createdAt: nowIso(),
-    storageVersion: STORAGE_VERSION,
-    totals: totalsFromItems(classified),
-    items: structuredClone(classified),
-  };
-}
-
-function comparePeriods(leftItems, rightItems) {
-  const itemKey = (i) => cleanText(i.id) || safeLower(i.name);
-  const lmap = new Map(leftItems.map((i) => [itemKey(i), i]));
-  const rmap = new Map(rightItems.map((i) => [itemKey(i), i]));
-  const keys = [...new Set([...lmap.keys(), ...rmap.keys()])];
-  const rows = keys.map((k) => {
-    const oldI = lmap.get(k); const newI = rmap.get(k);
-    const base = oldI || { id: '', name: newI.name, classification: 'Missing', effectiveMenuPrice: 0, unitsSold: 0, revenue: 0, totalGrossProfit: 0, foodCostPercent: 0, grossProfitPerPortion: 0, isActive: false };
-    const curr = newI || { id: '', name: oldI.name, classification: 'Missing', effectiveMenuPrice: 0, unitsSold: 0, revenue: 0, totalGrossProfit: 0, foodCostPercent: 0, grossProfitPerPortion: 0, isActive: false };
-    const priceChange = curr.effectiveMenuPrice - base.effectiveMenuPrice;
-    const unitsChange = curr.unitsSold - base.unitsSold;
-    const revenueChange = curr.revenue - base.revenue;
-    const profitChange = curr.totalGrossProfit - base.totalGrossProfit;
-    const foodCostChange = curr.foodCostPercent - base.foodCostPercent;
-    const isNewItem = base.classification === 'Missing' && curr.classification !== 'Missing';
-    const isRemovedItem = curr.classification === 'Missing' && base.classification !== 'Missing';
-    const improved = !isNewItem && !isRemovedItem && revenueChange > 0 && profitChange > 0;
-    const worsened = !isNewItem && (revenueChange < 0 || profitChange < 0 || isRemovedItem);
-    const classChanged = base.classification !== curr.classification;
-    const movement = isNewItem ? 'New item added' : isRemovedItem ? 'Removed from latest period' : classChanged ? `${base.classification} → ${curr.classification}` : 'No class change';
-    const severity = isRemovedItem || curr.grossProfitPerPortion <= 0.15 || curr.classification === 'Dog' || profitChange < 0 ? 'High' : worsened || classChanged ? 'Medium' : 'Low';
-    const movementType = isNewItem ? 'new' : isRemovedItem ? 'removed' : improved ? 'improved' : worsened ? 'worsened' : classChanged ? 'changed' : 'stable';
-    return { id: curr.id || base.id || k, name: curr.name || base.name, oldClassification: base.classification, newClassification: curr.classification, priceChange, unitsChange, revenueChange, profitChange, foodCostChange, improved, worsened, classChanged, movement, movementType, severity, action: isRemovedItem ? 'Review removal impact and replacement plan' : recommendedAction(curr), old: base, new: curr };
-  });
-  const leftTotals = totalsFromItems(leftItems); const rightTotals = totalsFromItems(rightItems);
-  const pct = (nv, ov) => ov === 0 ? null : ((nv - ov) / ov) * 100;
-  return {
-    rows,
-    summary: {
-      revenueDelta: rightTotals.totalRevenue - leftTotals.totalRevenue, revenuePct: pct(rightTotals.totalRevenue, leftTotals.totalRevenue),
-      grossProfitDelta: rightTotals.totalGrossProfit - leftTotals.totalGrossProfit, grossProfitPct: pct(rightTotals.totalGrossProfit, leftTotals.totalGrossProfit),
-      unitsDelta: rightTotals.totalUnits - leftTotals.totalUnits, unitsPct: pct(rightTotals.totalUnits, leftTotals.totalUnits),
-      foodCostDelta: rightTotals.avgFoodCostPercent - leftTotals.avgFoodCostPercent,
-      gpPerPortionDelta: rightTotals.avgGrossProfitPerPortion - leftTotals.avgGrossProfitPerPortion,
-      starsDelta: rightTotals.stars - leftTotals.stars, changedClasses: rows.filter((r) => r.oldClassification !== r.newClassification).length,
-      improved: rows.filter((r) => r.improved).length, worsened: rows.filter((r) => r.worsened).length,
-    },
-  };
-}
-
-function persistAll() {
-  setStored(STORAGE_KEYS.ingredients, state.ingredients); setStored(STORAGE_KEYS.recipes, state.recipes); setStored(STORAGE_KEYS.snapshots, state.snapshots);
-  setStored(STORAGE_KEYS.weeklyReviews, state.weeklyReviews); setStored(STORAGE_KEYS.weeklyDraft, state.weeklyReview); setStored(STORAGE_KEYS.prefs, state.prefs);
-}
-function persistDraft() { const r = readRecipeFromForm(); r.updatedAt = nowIso(); state.draft = r; setStored(STORAGE_KEYS.draft, r); dom.draftState.textContent = `Draft autosaved ${new Date().toLocaleTimeString()}`; }
-
-function sampleIngredients() {
-  return [
-    { id: uid('ing'), name: 'Baguette', purchasePrice: 8.4, packSize: 12, packUnit: 'unit', supplier: 'Metro Bakery', notes: '' },
-    { id: uid('ing'), name: 'Chicken Thigh', purchasePrice: 24, packSize: 5, packUnit: 'kg', supplier: 'Kiju Butchery', notes: '' },
-    { id: uid('ing'), name: 'Tofu', purchasePrice: 9.8, packSize: 2, packUnit: 'kg', supplier: 'Tofu House', notes: '' },
-    { id: uid('ing'), name: 'Wings', purchasePrice: 18, packSize: 5, packUnit: 'kg', supplier: 'Kiju Butchery', notes: '' },
-    { id: uid('ing'), name: 'Pickled Carrot', purchasePrice: 3.9, packSize: 1, packUnit: 'kg', supplier: '', notes: '' },
-    { id: uid('ing'), name: 'Daikon', purchasePrice: 2.8, packSize: 1, packUnit: 'kg', supplier: '', notes: '' },
-    { id: uid('ing'), name: 'Cucumber', purchasePrice: 5.5, packSize: 10, packUnit: 'unit', supplier: '', notes: '' },
-    { id: uid('ing'), name: 'Soy Glaze', purchasePrice: 5.8, packSize: 1, packUnit: 'l', supplier: '', notes: '' },
-    { id: uid('ing'), name: 'Takeaway Bowl', purchasePrice: 12, packSize: 100, packUnit: 'unit', supplier: '', notes: '' },
-  ];
-}
-function rowByName(ingredients, name, amountUsed, useUnit) {
-  const ing = ingredients.find((i) => safeLower(i.name) === safeLower(name));
-  return migrateRow({ ingredientId: ing?.id, ingredientNameSnapshot: ing?.name ?? name, purchasePriceSnapshot: ing?.purchasePrice, packSizeSnapshot: ing?.packSize, packUnitSnapshot: ing?.packUnit ?? useUnit, amountUsed, useUnit });
-}
-function sampleRecipes(ingredients) {
-  const base = [
-    { name: 'Chicken Banh Mi', category: 'Sandwich', portionsYielded: 10, targetFoodCostPercent: 28, packagingCostPerPortion: 0.32, labourCostPerPortion: 0.6, manualMenuPrice: 8.5, sellingPrice: 8.5, unitsSold: 320, ingredientRows: [rowByName(ingredients, 'Baguette', 10, 'unit'), rowByName(ingredients, 'Chicken Thigh', 1600, 'g'), rowByName(ingredients, 'Pickled Carrot', 300, 'g'), rowByName(ingredients, 'Daikon', 200, 'g')] },
-    { name: 'Tofu Bowl', category: 'Bowl', portionsYielded: 8, targetFoodCostPercent: 29, packagingCostPerPortion: 0.42, labourCostPerPortion: 0.7, manualMenuPrice: 9.95, sellingPrice: 9.95, unitsSold: 75, ingredientRows: [rowByName(ingredients, 'Tofu', 1500, 'g'), rowByName(ingredients, 'Cucumber', 3, 'unit'), rowByName(ingredients, 'Pickled Carrot', 220, 'g'), rowByName(ingredients, 'Takeaway Bowl', 8, 'unit')] },
-    { name: 'Chicken Bowl', category: 'Bowl', portionsYielded: 8, targetFoodCostPercent: 30, packagingCostPerPortion: 0.42, labourCostPerPortion: 0.8, manualMenuPrice: 10.5, sellingPrice: 10.5, unitsSold: 260, ingredientRows: [rowByName(ingredients, 'Chicken Thigh', 1600, 'g'), rowByName(ingredients, 'Cucumber', 4, 'unit'), rowByName(ingredients, 'Pickled Carrot', 220, 'g'), rowByName(ingredients, 'Takeaway Bowl', 8, 'unit')] },
-    { name: 'Wings', category: 'Sides', portionsYielded: 10, targetFoodCostPercent: 27, packagingCostPerPortion: 0.22, labourCostPerPortion: 0.45, manualMenuPrice: 7.75, sellingPrice: 7.75, unitsSold: 95, ingredientRows: [rowByName(ingredients, 'Wings', 1800, 'g'), rowByName(ingredients, 'Soy Glaze', 120, 'ml')] },
-  ];
-  return base.map((r) => migrateRecipe({ ...defaultRecipe(), ...r, id: uid('rec'), createdAt: nowIso(), updatedAt: nowIso() }));
-}
-function seedSnapshots() {
-  const live = state.recipes.map((r) => calculateRecipeMetrics(r, { suppressWarnings: true }));
-  const classed = classifyMenuItems(live).items;
-  const old = classed.map((i) => {
-    const mult = i.name.includes('Chicken Banh') ? 0.88 : i.name.includes('Tofu') ? 0.75 : i.name.includes('Wings') ? 1.08 : 0.93;
-    const oldUnits = Math.max(0, Math.round(i.unitsSold * mult));
-    const oldPrice = i.name.includes('Chicken Banh') ? i.effectiveMenuPrice - 0.25 : i.effectiveMenuPrice;
-    const revenue = oldUnits * oldPrice;
-    const gp = revenue - oldUnits * i.totalCostPerPortionExclLabour;
-    return { ...i, unitsSold: oldUnits, effectiveMenuPrice: oldPrice, revenue, totalGrossProfit: gp };
-  });
-  const oldClassed = classifyMenuItems(old).items;
-  return [
-    { id: uid('snap'), name: 'Last 30 Days', periodLabel: 'Mar 2026', createdAt: nowIso(), notes: 'Before menu pricing tweaks', totals: totalsFromItems(oldClassed), items: oldClassed },
-    { id: uid('snap'), name: 'Current Month', periodLabel: 'Apr 2026', createdAt: nowIso(), notes: 'Post pricing and promo changes', totals: totalsFromItems(classed), items: classed },
-  ];
-}
-
-function loadData() {
-  let ingredients = getStoredArray(STORAGE_KEYS.ingredients); let recipes = getStoredArray(STORAGE_KEYS.recipes); let snapshots = getStoredArray(STORAGE_KEYS.snapshots); let weeklyReviews = getStoredArray(STORAGE_KEYS.weeklyReviews);
-  const weeklyDraft = getStoredObject(STORAGE_KEYS.weeklyDraft, {});
-  if (!ingredients.length && !recipes.length) { ingredients = getStoredArray(STORAGE_KEYS.legacyIngredients); recipes = getStoredArray(STORAGE_KEYS.legacyRecipes); }
-  state.ingredients = ingredients.map(migrateIngredient);
-  state.recipes = recipes.map(migrateRecipe);
-  state.snapshots = Array.isArray(snapshots) ? snapshots : [];
-  state.weeklyReviews = Array.isArray(weeklyReviews) ? weeklyReviews : [];
-  state.weeklyReview = { ...state.weeklyReview, ...(weeklyDraft || {}) };
-  state.prefs = { ...state.prefs, ...getStoredObject(STORAGE_KEYS.prefs, {}) };
-  state.comparisonNotes = localStorage.getItem(STORAGE_KEYS.compareNotes) || '';
-
-  const seededFlag = localStorage.getItem(STORAGE_KEYS.seeded) || localStorage.getItem(STORAGE_KEYS.legacySeeded);
-  if (!state.ingredients.length && !state.recipes.length && !seededFlag) {
-    state.ingredients = sampleIngredients();
-    state.recipes = sampleRecipes(state.ingredients);
-    state.snapshots = seedSnapshots();
-    localStorage.setItem(STORAGE_KEYS.seeded, '1');
-  } else if (!state.snapshots.length && state.recipes.length) {
-    state.snapshots = seedSnapshots();
+function safeParse(k, fallback) {
+  try {
+    const val = JSON.parse(localStorage.getItem(k));
+    return val ?? fallback;
+  } catch {
+    return fallback;
   }
-
-  const storedDraft = safeParse(localStorage.getItem(STORAGE_KEYS.draft), null) || safeParse(localStorage.getItem(STORAGE_KEYS.legacyDraft), null);
-  state.draft = storedDraft ? migrateRecipe(storedDraft) : null;
-  persistAll();
 }
 
-function readRowsFromDom() {
-  const rows = [...dom.ingredientRows.querySelectorAll('tr')].map((tr) => {
-    const q = (s) => tr.querySelector(s);
-    return migrateRow({ rowId: tr.dataset.rowId, ingredientId: q('.row-lib-select').value, ingredientNameSnapshot: q('.row-name').value, purchasePriceSnapshot: q('.row-price').value, packSizeSnapshot: q('.row-pack-size').value, packUnitSnapshot: q('.row-pack-unit').value, amountUsed: q('.row-amount').value, useUnit: q('.row-use-unit').value, calculatedCostUsed: q('.row-cost').dataset.cost });
-  });
-  return rows.length ? rows : [defaultIngredientRow()];
-}
-function readRecipeFromForm() {
-  return migrateRecipe({
-    id: state.activeRecipeId, name: dom.fields.name.value, category: dom.fields.category.value, portionsYielded: dom.fields.portions.value, targetFoodCostPercent: dom.fields.target.value,
-    packagingCostPerPortion: dom.fields.packaging.value, labourCostPerPortion: dom.fields.labour.value, vatRatePercent: dom.fields.vat.value, deliveryCommissionPercent: dom.fields.delivery.value, roundingRule: dom.fields.rounding.value,
-    manualMenuPrice: dom.fields.manual.value === '' ? '' : dom.fields.manual.value, sellingPrice: dom.fields.sellingPrice.value, unitsSold: dom.fields.unitsSold.value, reportingPeriod: dom.fields.reportingPeriod.value || 'Last 30 Days', internalScore: dom.fields.internalScore.value,
-    isActive: dom.fields.isActive.value === 'true', revenueOverride: dom.fields.revenueOverride.value === '' ? '' : dom.fields.revenueOverride.value, itemNotes: dom.fields.itemNotes.value, ingredientRows: readRowsFromDom(),
-  });
-}
-function setRecipeToForm(recipe) {
-  dom.fields.name.value = recipe.name; dom.fields.category.value = recipe.category; dom.fields.portions.value = recipe.portionsYielded; dom.fields.target.value = recipe.targetFoodCostPercent;
-  dom.fields.packaging.value = recipe.packagingCostPerPortion; dom.fields.labour.value = recipe.labourCostPerPortion; dom.fields.vat.value = recipe.vatRatePercent; dom.fields.delivery.value = recipe.deliveryCommissionPercent;
-  dom.fields.rounding.value = String(recipe.roundingRule); dom.fields.manual.value = recipe.manualMenuPrice === '' ? '' : recipe.manualMenuPrice; dom.fields.sellingPrice.value = recipe.sellingPrice;
-  dom.fields.unitsSold.value = recipe.unitsSold; dom.fields.reportingPeriod.value = recipe.reportingPeriod; dom.fields.internalScore.value = recipe.internalScore; dom.fields.isActive.value = String(recipe.isActive);
-  dom.fields.revenueOverride.value = recipe.revenueOverride; dom.fields.itemNotes.value = recipe.itemNotes;
-  dom.ingredientRows.innerHTML = ''; (recipe.ingredientRows?.length ? recipe.ingredientRows : [defaultIngredientRow()]).forEach(addRowToDom); recalcAndRender();
-}
-function addRowToDom(rowData = defaultIngredientRow()) {
-  const fragment = dom.template.content.cloneNode(true); const tr = fragment.querySelector('tr'); tr.dataset.rowId = rowData.rowId || uid('row');
-  const select = tr.querySelector('.row-lib-select'); select.innerHTML = '<option value="">Manual / Snapshot</option>';
-  state.ingredients.forEach((ing) => { const o = document.createElement('option'); o.value = ing.id; o.textContent = ing.name; select.appendChild(o); });
-  tr.querySelector('.row-name').value = rowData.ingredientNameSnapshot || ''; tr.querySelector('.row-price').value = rowData.purchasePriceSnapshot; tr.querySelector('.row-pack-size').value = rowData.packSizeSnapshot;
-  tr.querySelector('.row-pack-unit').value = rowData.packUnitSnapshot; tr.querySelector('.row-amount').value = rowData.amountUsed; tr.querySelector('.row-use-unit').value = rowData.useUnit; select.value = rowData.ingredientId || '';
-  select.addEventListener('change', () => {
-    const ing = state.ingredients.find((x) => x.id === select.value); if (!ing) return;
-    tr.querySelector('.row-name').value = ing.name; tr.querySelector('.row-price').value = ing.purchasePrice; tr.querySelector('.row-pack-size').value = ing.packSize; tr.querySelector('.row-pack-unit').value = ing.packUnit; tr.querySelector('.row-use-unit').value = ing.packUnit;
-    recalcAndRender();
-  });
-  ['.row-name', '.row-price', '.row-pack-size', '.row-pack-unit', '.row-amount', '.row-use-unit'].forEach((s) => { const el = tr.querySelector(s); el.addEventListener('input', recalcAndRender); el.addEventListener('change', recalcAndRender); });
-  tr.querySelector('.row-remove').addEventListener('click', () => { tr.remove(); if (!dom.ingredientRows.querySelector('tr')) addRowToDom(); recalcAndRender(); });
-  dom.ingredientRows.appendChild(fragment);
+function setStored(k, v) { localStorage.setItem(k, JSON.stringify(v)); }
+function persist() {
+  setStored(STORAGE_KEYS.ingredients, state.ingredients);
+  setStored(STORAGE_KEYS.recipes, state.recipes);
+  setStored(STORAGE_KEYS.dishes, state.dishes);
+  setStored(STORAGE_KEYS.snapshots, state.snapshots);
+  setStored(STORAGE_KEYS.weeklyReviews, state.weeklyReviews);
 }
 
-function renderRecipeList() {
-  const q = safeLower(state.recipeSearch);
-  const rows = state.recipes.map((r) => calculateRecipeMetrics(r, { suppressWarnings: true })).filter((r) => (!q || safeLower(r.name).includes(q)) && (state.recipeStatusFilter === 'all' || (state.recipeStatusFilter === 'active' ? r.isActive : !r.isActive))).sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
-  dom.recipeCount.textContent = rows.length; dom.recipeList.innerHTML = '';
-  if (!rows.length) return dom.recipeList.innerHTML = '<li class="helper-text">No recipes found.</li>';
-  rows.forEach((r) => {
-    const li = document.createElement('li'); li.className = `recipe-item ${state.activeRecipeId === r.id ? 'active' : ''}`;
-    li.innerHTML = `<strong>${r.name || '(Untitled)'}</strong><p>${r.category || 'No category'} · ${r.reportingPeriod}</p><p>${fmtCurrency(r.effectiveMenuPrice)} · ${fmtInt(r.unitsSold)} units</p>`;
-    li.addEventListener('click', () => { state.activeRecipeId = r.id; setRecipeToForm(migrateRecipe(r)); renderRecipeList(); }); dom.recipeList.appendChild(li);
-  });
+function convertUnit(value, from, to) {
+  if (!from || !to || UNIT_GROUP[from] !== UNIT_GROUP[to]) return { ok: false, value: 0 };
+  return { ok: true, value: (n(value) * UNIT_FACTOR[from]) / UNIT_FACTOR[to] };
 }
 
-function renderDashboard() {
-  const metrics = state.recipes.map((r) => calculateRecipeMetrics(r, { suppressWarnings: true }));
-  state.menuEngine = classifyMenuItems(metrics);
-  const items = state.menuEngine.items.map((i) => ({ ...i, flags: getItemFlags(i), action: recommendedAction(i) }));
-  const totals = totalsFromItems(items);
-  dom.periodLabel.textContent = `Period: ${items[0]?.reportingPeriod || 'mixed'}`;
-  const cards = [
-    ['Active Items', totals.activeItems], ['Total Units', fmtInt(totals.totalUnits)], ['Total Revenue', fmtCurrency(totals.totalRevenue)], ['Total Gross Profit', fmtCurrency(totals.totalGrossProfit)],
-    ['Avg Selling Price', fmtCurrency(totals.avgSellingPrice)], ['Avg GP / Portion', fmtCurrency(totals.avgGrossProfitPerPortion)], ['Avg Food Cost %', fmtPercent(totals.avgFoodCostPercent)],
-    ['Stars', totals.stars], ['Plowhorses', totals.plowhorses], ['Puzzles', totals.puzzles], ['Dogs', totals.dogs],
-    ['Improved Items', state.comparison?.summary?.improved ?? 0], ['Worsened Items', state.comparison?.summary?.worsened ?? 0], ['Need Action', items.filter((i) => i.flags.length).length],
-  ];
-  dom.dashboardCards.innerHTML = cards.map(([k, v]) => `<div class="metric-card"><span>${k}</span><strong>${v}</strong></div>`).join('');
-
-  const topRevenue = [...items].sort((a, b) => b.revenue - a.revenue)[0];
-  const topProfit = [...items].sort((a, b) => b.totalGrossProfit - a.totalGrossProfit)[0];
-  const weakestMargin = [...items].sort((a, b) => a.grossProfitPerPortion - b.grossProfitPerPortion)[0];
-  const strongestMomentum = state.comparison?.rows?.slice().sort((a, b) => b.profitChange - a.profitChange)[0];
-  const biggestDecline = state.comparison?.rows?.slice().sort((a, b) => a.profitChange - b.profitChange)[0];
-  const highFoodCost = items.filter((i) => i.foodCostPercent > state.prefs.foodCostFlagTarget);
-  const lowPrice = items.filter((i) => i.effectiveMenuPrice < i.roundedSellingPrice);
-  const highlights = [
-    `Biggest revenue driver: ${topRevenue ? `${topRevenue.name} (${fmtCurrency(topRevenue.revenue)})` : 'N/A'}`,
-    `Biggest profit driver: ${topProfit ? `${topProfit.name} (${fmtCurrency(topProfit.totalGrossProfit)})` : 'N/A'}`,
-    `Weakest margin item: ${weakestMargin ? `${weakestMargin.name} (${fmtCurrency(weakestMargin.grossProfitPerPortion)}/portion)` : 'N/A'}`,
-    `${highFoodCost.length} item(s) above target food cost (${state.prefs.foodCostFlagTarget}%)`,
-    `${lowPrice.length} item(s) priced below recommendation`,
-    state.comparison ? `Best momentum: ${strongestMomentum?.name || 'N/A'} (${fmtCurrency(strongestMomentum?.profitChange || 0)} GP change)` : 'Run a comparison to evaluate momentum.',
-    state.comparison ? `Largest decline: ${biggestDecline?.name || 'N/A'} (${fmtCurrency(biggestDecline?.profitChange || 0)} GP change)` : `Create at least 1 snapshot to start trend tracking.`,
-    state.comparison ? `Classification changes in selected comparison: ${state.comparison.summary.changedClasses}` : 'Run a comparison to see class movement.',
-  ];
-  dom.menuInsightList.innerHTML = highlights.map((h) => `<li>${h}</li>`).join('');
-
-  const priorities = [...items].flatMap((i) => i.flags.map((flag) => {
-    const score = scorePriority(i, flag);
-    const severity = score >= 140 ? 'High' : score >= 75 ? 'Medium' : 'Low';
-    return { name: i.name, flag, severity, score, action: recommendedAction(i) };
-  })).sort((a, b) => b.score - a.score).slice(0, 12);
-  dom.priorityList.innerHTML = priorities.length ? priorities.map((p) => `<li><strong>${p.name}</strong> — ${p.flag} <span class="movement-chip">${p.severity} · ${p.score}</span><br/><span class="helper-text">${p.action}</span></li>`).join('') : '<li class="empty-state">No priority flags right now.</li>';
-
-  const latestSnapshot = state.snapshots.slice().sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))[0];
-  const weeklyStatus = state.weeklyReviews[0] ? `Last completed: ${state.weeklyReviews[0].name} (${shortDateTime(state.weeklyReviews[0].createdAt)})` : 'Weekly review not completed yet';
-  const attentionRows = [
-    `${highFoodCost.length} item(s) above target food cost`,
-    `${lowPrice.length} item(s) priced below recommendation`,
-    `${items.filter((i) => i.grossProfitPerPortion <= 0.15).length} item(s) with weak margin`,
-    `${state.comparison?.summary?.changedClasses ?? 0} recent classification downgrades/changes`,
-    state.weeklyReviews.length ? 'Weekly review completed' : 'Weekly review not completed',
-  ];
-  dom.homeKpiCards.innerHTML = [
-    ['Active menu items', totals.activeItems],
-    ['Total revenue', fmtCurrency(totals.totalRevenue)],
-    ['Total gross profit', fmtCurrency(totals.totalGrossProfit)],
-    ['Average food cost %', fmtPercent(totals.avgFoodCostPercent)],
-    ['Items needing review', items.filter((i) => i.flags.length).length],
-    ['Latest snapshot period', latestSnapshot ? latestSnapshot.periodLabel : 'No snapshot'],
-    ['Weekly review status', state.weeklyReviews[0] ? 'Completed' : 'Pending'],
-  ].map(([k, v]) => `<div class="metric-card"><span>${k}</span><strong>${v}</strong></div>`).join('');
-  dom.homeAttentionList.innerHTML = attentionRows.map((x) => `<li>${x}</li>`).join('');
-  dom.homeSummaryList.innerHTML = [
-    latestSnapshot ? `Latest snapshot: ${latestSnapshot.name} (${latestSnapshot.periodLabel})` : 'No snapshots yet. Create your first snapshot in Reports.',
-    state.comparison ? `Current comparison: ${state.comparison.leftLabel} → ${state.comparison.rightLabel}` : 'No comparison currently selected.',
-    weeklyStatus,
-  ].map((x) => `<li>${x}</li>`).join('');
-
-  renderAnalysisTable(items);
-  renderMatrix(items);
-  renderSnapshotList();
-  renderComparisonSummary();
-  dom.reviewSummaryOutput.textContent = reviewSummaryText();
+function rowIngredientCost(input) {
+  const ing = state.ingredients.find((i) => i.id === input.sourceId);
+  if (!ing) return 0;
+  const cv = convertUnit(input.quantityUsed, input.useUnit, ing.packUnit);
+  if (!cv.ok) return 0;
+  return (ing.purchasePrice / Math.max(ing.packSize, 0.0001)) * cv.value;
 }
 
-function renderAnalysisTable(items) {
-  let rows = [...items];
-  if (state.analysisSearch) rows = rows.filter((i) => safeLower(i.name).includes(safeLower(state.analysisSearch)));
-  if (state.analysisClassFilter !== 'all') rows = rows.filter((i) => i.classification === state.analysisClassFilter);
-  const dir = state.sort.dir === 'asc' ? 1 : -1; const k = state.sort.key;
-  rows.sort((a, b) => (typeof a[k] === 'string' ? String(a[k]).localeCompare(String(b[k])) : toNumber(a[k]) - toNumber(b[k])) * dir);
-  dom.analysisBody.innerHTML = rows.length ? rows.map((i) => `<tr><td>${i.name}</td><td><span class="badge badge-${i.classification.toLowerCase()}">${i.classification}</span></td><td>${fmtCurrency(i.effectiveMenuPrice)}</td><td>${fmtCurrency(i.grossProfitPerPortion)}</td><td class="${i.foodCostPercent > state.prefs.foodCostFlagTarget ? 'value-warn' : ''}">${fmtPercent(i.foodCostPercent)}</td><td>${fmtInt(i.unitsSold)}</td><td>${fmtCurrency(i.revenue)}</td><td>${fmtCurrency(i.totalGrossProfit)}</td><td>${i.action}</td></tr>`).join('') : '<tr><td colspan="9">No items match filters.</td></tr>';
+function recipeMetrics(recipe) {
+  const rows = (recipe.ingredientInputs || []).map((r) => ({ ...r, calculatedCost: rowIngredientCost(r) }));
+  const totalBatchCost = rows.reduce((s, r) => s + r.calculatedCost, 0);
+  const costPerYieldUnit = totalBatchCost / Math.max(n(recipe.yieldQuantity, 1), 0.0001);
+  return { rows, totalBatchCost, costPerYieldUnit };
 }
-function renderMatrix(items) {
-  const active = items.filter((i) => i.isActive && i.classification !== 'Unclassified'); dom.matrixChart.innerHTML = '';
-  if (active.length < 2) { dom.matrixFallback.textContent = 'Add more active items to render matrix.'; return; }
-  dom.matrixFallback.textContent = '';
-  const maxU = Math.max(...active.map((i) => i.unitsSold), 1); const maxG = Math.max(...active.map((i) => i.grossProfitPerPortion), 0.01);
-  active.forEach((i) => {
-    const p = document.createElement('div'); p.className = `matrix-point badge-${i.classification.toLowerCase()}`; p.style.left = `${clamp((i.unitsSold / maxU) * 100, 4, 96)}%`; p.style.bottom = `${clamp((i.grossProfitPerPortion / maxG) * 100, 4, 96)}%`; p.title = `${i.name} · ${i.classification}`; p.textContent = i.name.length > 16 ? `${i.name.slice(0, 15)}…` : i.name; dom.matrixChart.appendChild(p);
+
+function dishComponentCost(component) {
+  if (component.sourceType === 'ingredient') {
+    const ing = state.ingredients.find((i) => i.id === component.sourceId);
+    if (!ing) return 0;
+    const cv = convertUnit(component.quantityUsed, component.useUnit, ing.packUnit);
+    if (!cv.ok) return 0;
+    return (ing.purchasePrice / Math.max(ing.packSize, 0.0001)) * cv.value;
+  }
+  const recipe = state.recipes.find((r) => r.id === component.sourceId);
+  if (!recipe) return 0;
+  const rm = recipeMetrics(recipe);
+  const cv = convertUnit(component.quantityUsed, component.useUnit, recipe.yieldUnit);
+  if (!cv.ok) return 0;
+  return rm.costPerYieldUnit * cv.value;
+}
+
+function dishMetrics(dish) {
+  const components = (dish.components || []).map((c) => ({ ...c, calculatedCost: dishComponentCost(c) }));
+  const componentCost = components.reduce((s, c) => s + c.calculatedCost, 0);
+  const totalPortionCost = componentCost + n(dish.packagingCostPerPortion, 0);
+  const suggestedPrice = totalPortionCost / (Math.max(n(dish.targetFoodCostPercent, 30), 0.01) / 100);
+  const rule = Math.max(n(dish.roundingRule, 0.25), 0.01);
+  const roundedPrice = Math.round(suggestedPrice / rule) * rule;
+  const effectivePrice = n(dish.manualPriceOverride, 0) > 0 ? n(dish.manualPriceOverride) : (n(dish.currentSellingPrice, 0) > 0 ? n(dish.currentSellingPrice) : roundedPrice);
+  const foodCostPercent = effectivePrice > 0 ? (totalPortionCost / effectivePrice) * 100 : 0;
+  const unitsSold = Math.max(0, Math.round(n(dish.unitsSold, 0)));
+  const revenue = effectivePrice * unitsSold;
+  const totalGrossProfit = (effectivePrice - totalPortionCost) * unitsSold;
+  const grossProfitPerPortion = effectivePrice - totalPortionCost;
+  return { components, totalPortionCost, suggestedPrice, roundedPrice, effectivePrice, foodCostPercent, revenue, totalGrossProfit, grossProfitPerPortion, unitsSold };
+}
+
+function classifyDishes(items) {
+  const active = items.filter((d) => d.active);
+  if (active.length < 2) return items.map((d) => ({ ...d, classification: d.active ? 'Unclassified' : 'Inactive' }));
+  const avgUnits = active.reduce((s, d) => s + d.unitsSold, 0) / active.length;
+  const avgGp = active.reduce((s, d) => s + d.grossProfitPerPortion, 0) / active.length;
+  return items.map((d) => {
+    if (!d.active) return { ...d, classification: 'Inactive' };
+    const highUnits = d.unitsSold >= avgUnits;
+    const highGp = d.grossProfitPerPortion >= avgGp;
+    const classification = highUnits && highGp ? 'Star' : highUnits ? 'Plowhorse' : highGp ? 'Puzzle' : 'Dog';
+    return { ...d, classification };
   });
 }
 
-function renderSnapshotSelectors() {
-  const ordered = state.snapshots.slice().sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-  const options = ['<option value="live">Current Live Data</option>', ...ordered.map((s) => `<option value="${s.id}">${s.name} · ${s.periodLabel}</option>`)];
-  dom.compareLeft.innerHTML = options.join(''); dom.compareRight.innerHTML = options.join('');
-  if (!dom.compareRight.value && ordered[0]) dom.compareRight.value = ordered[0].id;
-  if (!dom.compareLeft.value) dom.compareLeft.value = 'live';
+function isLegacyDishLikeRecipe(raw) {
+  const keys = ['targetFoodCostPercent', 'targetFoodCost', 'sellingPrice', 'currentSellingPrice', 'unitsSold', 'packagingCost', 'packagingCostPerPortion', 'deliveryCommissionPercent', 'vatRatePercent', 'roundingRule'];
+  return keys.some((k) => raw && raw[k] !== undefined && raw[k] !== null && raw[k] !== '');
 }
-function renderSnapshotList() {
-  dom.snapshotList.innerHTML = state.snapshots.length
-    ? state.snapshots.slice().sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).map((s) => `<li><strong>${s.name}</strong> (${s.periodLabel})<br/><span class="helper-text">${shortDateTime(s.createdAt)} · ${s.notes || 'No notes'}</span><br/><button class="btn btn-secondary" data-snapshot-view="${s.id}" type="button">Load</button> <button class="btn btn-danger" data-snapshot-delete="${s.id}" type="button">Delete</button></li>`).join('')
-    : '<li class="empty-state">No snapshots yet. Create a first snapshot to unlock period-over-period reporting.</li>';
-}
-function renderComparisonSummary() {
-  if (!state.comparison) {
-    dom.comparisonSummary.innerHTML = state.snapshots.length < 1
-      ? '<li class="empty-state">No snapshot history yet. Create one snapshot, then compare it with live data.</li>'
-      : '<li class="empty-state">No comparison selected. Choose periods above and click Run Comparison.</li>';
-    dom.comparisonBody.innerHTML = '<tr><td colspan="10">Select periods and run comparison.</td></tr>';
-    if (MODE_META[state.currentMode]) dom.modeIndicator.textContent = `Mode: ${MODE_META[state.currentMode].title} · Live`;
+
+function migrateLegacyData() {
+  const v5 = safeParse(STORAGE_KEYS.ingredients, null);
+  if (Array.isArray(v5)) {
+    state.ingredients = v5;
+    state.recipes = safeParse(STORAGE_KEYS.recipes, []);
+    state.dishes = safeParse(STORAGE_KEYS.dishes, []);
+    state.snapshots = safeParse(STORAGE_KEYS.snapshots, []);
+    state.weeklyReviews = safeParse(STORAGE_KEYS.weeklyReviews, []);
     return;
   }
-  const s = state.comparison.summary;
-  const pct = (v) => (v === null || !Number.isFinite(v) ? 'n/a' : `${v.toFixed(1)}%`);
-  dom.comparisonSummary.innerHTML = [
-    `Revenue: ${s.revenueDelta >= 0 ? '▲' : '▼'} ${fmtCurrency(s.revenueDelta)} (${pct(s.revenuePct)})`,
-    `Gross profit: ${s.grossProfitDelta >= 0 ? '▲' : '▼'} ${fmtCurrency(s.grossProfitDelta)} (${pct(s.grossProfitPct)})`,
-    `Units sold: ${s.unitsDelta >= 0 ? '▲' : '▼'} ${fmtInt(s.unitsDelta)} (${pct(s.unitsPct)})`,
-    `Avg food cost: ${s.foodCostDelta >= 0 ? '▲' : '▼'} ${s.foodCostDelta.toFixed(2)} pts`,
-    `Avg GP/portion: ${s.gpPerPortionDelta >= 0 ? '▲' : '▼'} ${fmtCurrency(s.gpPerPortionDelta)}`,
-    `Class changes: ${s.changedClasses} · Improved: ${s.improved} · Worsened: ${s.worsened}`,
-  ].map((x) => `<li>${x}</li>`).join('');
-  if (MODE_META[state.currentMode]) dom.modeIndicator.textContent = `Mode: ${MODE_META[state.currentMode].title} · Comparison: ${state.comparison.leftLabel} → ${state.comparison.rightLabel}`;
-  renderComparisonTable();
-}
-function renderComparisonTable() {
-  if (!state.comparison) return;
-  let rows = [...state.comparison.rows];
-  if (state.compareSearch) rows = rows.filter((r) => safeLower(r.name).includes(safeLower(state.compareSearch)));
-  if (state.compareMovementFilter === 'improved') rows = rows.filter((r) => r.improved || r.movementType === 'new');
-  if (state.compareMovementFilter === 'worsened') rows = rows.filter((r) => r.worsened || r.movementType === 'removed');
-  if (state.compareMovementFilter === 'changed') rows = rows.filter((r) => r.classChanged);
-  const k = state.csort.key; const dir = state.csort.dir === 'asc' ? 1 : -1;
-  rows.sort((a, b) => (typeof a[k] === 'string' ? String(a[k]).localeCompare(String(b[k])) : toNumber(a[k]) - toNumber(b[k])) * dir);
-  const movementClass = (r) => (r.movementType === 'new' ? 'movement-new' : r.movementType === 'removed' ? 'movement-removed' : r.worsened ? 'movement-down' : 'movement-up');
-  dom.comparisonBody.innerHTML = rows.length ? rows.map((r) => `<tr><td>${r.name}</td><td>${r.oldClassification}</td><td>${r.newClassification}</td><td class="${r.priceChange >= 0 ? 'value-good' : 'value-bad'}">${fmtCurrency(r.priceChange)}</td><td class="${r.unitsChange >= 0 ? 'value-good' : 'value-bad'}">${fmtInt(r.unitsChange)}</td><td class="${r.revenueChange >= 0 ? 'value-good' : 'value-bad'}">${fmtCurrency(r.revenueChange)}</td><td class="${r.profitChange >= 0 ? 'value-good' : 'value-bad'}">${fmtCurrency(r.profitChange)}</td><td>${r.foodCostChange.toFixed(2)} pts</td><td><span class="movement-chip ${movementClass(r)}">${r.movement}</span></td><td>${r.action} <span class="movement-chip">${r.severity}</span></td></tr>`).join('') : '<tr><td colspan="10">No comparable items for filters.</td></tr>';
-}
 
-function recalcAndRender() {
-  const r = readRecipeFromForm(); const m = calculateRecipeMetrics(r);
-  [...dom.ingredientRows.querySelectorAll('tr')].forEach((tr, i) => {
-    const c = m.ingredientRows[i]?.calculatedCostUsed ?? 0; const cell = tr.querySelector('.row-cost'); cell.dataset.cost = c; cell.textContent = fmtCurrency(c);
+  const legacyIngredients = safeParse(STORAGE_KEYS.legacyIngredients, []);
+  const legacyRecipes = safeParse(STORAGE_KEYS.legacyRecipes, []);
+  state.ingredients = (legacyIngredients || []).map((i) => ({
+    id: t(i.id) || uid('ing'),
+    name: t(i.name),
+    purchasePrice: Math.max(0, n(i.purchasePrice, i.price)),
+    packSize: Math.max(0.0001, n(i.packSize, 1)),
+    packUnit: UNITS.includes(i.packUnit) ? i.packUnit : 'g',
+    supplier: t(i.supplier),
+    notes: t(i.notes),
+    createdAt: t(i.createdAt) || now(),
+    updatedAt: now(),
+  }));
+
+  state.recipes = [];
+  state.dishes = [];
+
+  (legacyRecipes || []).forEach((r) => {
+    const id = t(r.id) || uid('legacy');
+    const rows = Array.isArray(r.ingredientRows) ? r.ingredientRows : [];
+    const ingredientInputs = rows.map((row) => ({
+      id: uid('rin'),
+      sourceId: t(row.ingredientId),
+      sourceNameSnapshot: t(row.ingredientNameSnapshot || row.name),
+      quantityUsed: Math.max(0, n(row.amountUsed)),
+      useUnit: UNITS.includes(row.useUnit) ? row.useUnit : 'g',
+      calculatedCost: 0,
+    }));
+
+    if (isLegacyDishLikeRecipe(r)) {
+      state.dishes.push({
+        id: uid('dish'),
+        name: t(r.name) || `Migrated Dish ${id}`,
+        category: t(r.category),
+        active: typeof r.isActive === 'boolean' ? r.isActive : true,
+        components: ingredientInputs.map((ri) => ({ ...ri, sourceType: 'ingredient' })),
+        packagingCostPerPortion: Math.max(0, n(r.packagingCostPerPortion, r.packagingCost)),
+        targetFoodCostPercent: Math.max(0.01, n(r.targetFoodCostPercent, r.targetFoodCost, 30)),
+        vatRatePercent: Math.max(0, n(r.vatRatePercent, 20)),
+        deliveryCommissionPercent: Math.max(0, n(r.deliveryCommissionPercent, 30)),
+        roundingRule: Math.max(0.01, n(r.roundingRule, 0.25)),
+        currentSellingPrice: Math.max(0, n(r.currentSellingPrice, r.sellingPrice)),
+        manualPriceOverride: n(r.manualMenuPrice, 0) || '',
+        unitsSold: Math.max(0, Math.round(n(r.unitsSold, 0))),
+        reportingPeriod: t(r.reportingPeriod) || 'Migrated',
+        notes: t(r.itemNotes),
+        createdAt: t(r.createdAt) || now(),
+        updatedAt: now(),
+      });
+    } else {
+      state.recipes.push({
+        id: uid('rec'),
+        name: t(r.name) || `Migrated Recipe ${id}`,
+        category: t(r.category),
+        yieldQuantity: Math.max(0.01, n(r.yieldQuantity, r.portionsYielded, 1)),
+        yieldUnit: UNITS.includes(r.yieldUnit) ? r.yieldUnit : 'unit',
+        ingredientInputs,
+        notes: t(r.notes || r.itemNotes),
+        totalBatchCost: 0,
+        costPerYieldUnit: 0,
+        createdAt: t(r.createdAt) || now(),
+        updatedAt: now(),
+      });
+    }
   });
-  dom.results.totalIngredient.textContent = fmtCurrency(m.totalIngredientCost); dom.results.totalPortion.textContent = fmtCurrency(m.totalCostPerPortionExclLabour);
-  dom.results.rounded.textContent = fmtCurrency(m.roundedSellingPrice); dom.results.gross.textContent = fmtCurrency(m.grossProfitPerPortion); dom.results.foodRounded.textContent = fmtPercent(m.foodCostPercent);
-  dom.results.totalRevenue.textContent = fmtCurrency(m.revenue); dom.results.totalGrossProfit.textContent = fmtCurrency(m.totalGrossProfit);
-  const classified = state.menuEngine?.items?.find((x) => x.id === m.id) || { ...m, classification: 'Unclassified' };
-  dom.results.classification.textContent = classified.classification; dom.results.action.textContent = recommendedAction(classified);
-  dom.insightList.innerHTML = [m.foodCostPercent > m.targetFoodCostPercent ? `Food cost (${fmtPercent(m.foodCostPercent)}) above target.` : 'Food cost near target.', m.effectiveMenuPrice < m.roundedSellingPrice ? 'Current price is below recommendation.' : 'Current price is aligned with recommendation.'].map((x) => `<li>${x}</li>`).join('');
-  dom.itemFlagList.innerHTML = getItemFlags(classified).map((x) => `<li>${x}</li>`).join('') || '<li>No major flags.</li>';
-  setInlineMessage(dom.calcWarnings, m.warnings.join(' · '));
-  if (document.activeElement !== dom.fields.sellingPrice && (!toNumber(dom.fields.sellingPrice.value) || toNumber(dom.fields.sellingPrice.value) === 0) && m.roundedSellingPrice > 0) dom.fields.sellingPrice.value = m.roundedSellingPrice.toFixed(2);
-  persistDraft();
+
+  state.snapshots = safeParse(STORAGE_KEYS.legacySnapshots, []);
+  state.weeklyReviews = safeParse(STORAGE_KEYS.legacyWeekly, []);
+  persist();
 }
 
-function validateRecipe(r) {
-  const e = []; if (!r.name) e.push('Recipe name is required.'); if (!(r.portionsYielded > 0)) e.push('Portions yielded must be greater than 0.'); if (!(r.targetFoodCostPercent > 0 && r.targetFoodCostPercent < 100)) e.push('Target food cost must be between 0 and 100.');
-  return e;
+function modeSwitch(mode) {
+  state.mode = mode;
+  document.querySelectorAll('.mode-tab').forEach((b) => b.classList.toggle('active', b.dataset.mode === mode));
+  document.querySelectorAll('.mode-panel').forEach((p) => {
+    const active = p.dataset.panel === mode;
+    p.classList.toggle('active', active);
+    p.hidden = !active;
+  });
+  $('mode-indicator').textContent = `Mode: ${document.querySelector(`.mode-tab[data-mode="${mode}"]`).textContent}`;
 }
-function resetRecipeForm() { state.activeRecipeId = null; setRecipeToForm(defaultRecipe()); setInlineMessage(dom.editorErrors, ''); }
-function upsertRecipe(mode) {
-  const r = readRecipeFromForm(); const errors = validateRecipe(r); if (errors.length) return setInlineMessage(dom.editorErrors, errors.join(' '));
-  if (mode === 'save') { r.id = uid('rec'); r.createdAt = nowIso(); r.updatedAt = nowIso(); state.recipes.unshift(r); state.activeRecipeId = r.id; setInlineMessage(dom.editorErrors, 'Recipe saved.', 'success'); }
-  if (mode === 'update') { if (!state.activeRecipeId) return setInlineMessage(dom.editorErrors, 'Select a recipe to update.'); r.id = state.activeRecipeId; const old = state.recipes.find((x) => x.id === r.id); r.createdAt = old?.createdAt || nowIso(); r.updatedAt = nowIso(); state.recipes = state.recipes.map((x) => x.id === r.id ? r : x); setInlineMessage(dom.editorErrors, 'Recipe updated.', 'success'); }
-  persistAll(); renderRecipeList(); renderDashboard();
-}
-function duplicateRecipe() { const src = state.recipes.find((r) => r.id === state.activeRecipeId); if (!src) return setInlineMessage(dom.editorErrors, 'Select a recipe to duplicate.'); const cp = migrateRecipe({ ...src, id: uid('rec'), name: `${src.name} (Copy)`, createdAt: nowIso(), updatedAt: nowIso() }); state.recipes.unshift(cp); state.activeRecipeId = cp.id; persistAll(); setRecipeToForm(cp); renderRecipeList(); renderDashboard(); }
-function deleteRecipe() { const rec = state.recipes.find((r) => r.id === state.activeRecipeId); if (!rec) return setInlineMessage(dom.editorErrors, 'Select a recipe to delete.'); if (!window.confirm(`Delete "${rec.name}"?`)) return; state.recipes = state.recipes.filter((r) => r.id !== rec.id); state.activeRecipeId = null; persistAll(); resetRecipeForm(); renderRecipeList(); renderDashboard(); }
 
-function readIngredientForm() { return { name: cleanText(dom.library.name.value), purchasePrice: toNumber(dom.library.price.value), packSize: toNumber(dom.library.packSize.value), packUnit: dom.library.packUnit.value, supplier: cleanText(dom.library.supplier.value), notes: cleanText(dom.library.notes.value) }; }
-function clearIngredientForm() { state.ingredientEditingId = null; dom.library.name.value = ''; dom.library.price.value = ''; dom.library.packSize.value = ''; dom.library.packUnit.value = ''; dom.library.supplier.value = ''; dom.library.notes.value = ''; setInlineMessage(dom.library.errors, ''); }
-function renderIngredientLibrary() {
-  const q = safeLower(state.ingredientSearch); const usage = new Map(); state.recipes.forEach((r) => (r.ingredientRows || []).forEach((row) => { if (row.ingredientId) usage.set(row.ingredientId, (usage.get(row.ingredientId) || 0) + 1); }));
-  const rows = state.ingredients.filter((i) => !q || safeLower(i.name).includes(q)); dom.library.count.textContent = rows.length; dom.library.body.innerHTML = rows.length ? rows.map((i) => `<tr><td>${i.name}</td><td>${fmtCurrency(i.purchasePrice)}</td><td>${i.packSize} ${i.packUnit}</td><td>${i.supplier || '—'}</td><td>${i.notes || '—'}</td><td>${usage.get(i.id) || 0}</td><td><button class="btn btn-secondary" data-action="edit" data-id="${i.id}">Edit</button> <button class="btn btn-danger" data-action="delete" data-id="${i.id}">Delete</button></td></tr>`).join('') : '<tr><td colspan="7">No ingredients found.</td></tr>';
+function renderIngredients() {
+  $('ing-body').innerHTML = state.ingredients.map((i) => `<tr><td>${i.name}</td><td>${money(i.purchasePrice)}</td><td>${i.packSize} ${i.packUnit}</td><td>${i.supplier || '—'}</td><td><button class="btn" data-ing-edit="${i.id}">Edit</button> <button class="btn danger" data-ing-del="${i.id}">Delete</button></td></tr>`).join('');
 }
-function refreshRowIngredientOptions() { const rows = readRowsFromDom(); dom.ingredientRows.innerHTML = ''; rows.forEach(addRowToDom); }
+
+function fillRecipeRowOptions(row) {
+  const sel = row.querySelector('.src-id');
+  sel.innerHTML = '<option value="">Select ingredient</option>' + state.ingredients.map((i) => `<option value="${i.id}">${i.name}</option>`).join('');
+}
+function addRecipeRow(data = null) {
+  const row = $('recipe-row-template').content.firstElementChild.cloneNode(true);
+  fillRecipeRowOptions(row);
+  if (data) {
+    row.querySelector('.src-id').value = data.sourceId;
+    row.querySelector('.qty').value = data.quantityUsed;
+    row.querySelector('.unit').value = data.useUnit;
+  }
+  row.querySelector('.remove').addEventListener('click', () => { row.remove(); renderRecipeMetrics(); });
+  row.querySelectorAll('select,input').forEach((el) => el.addEventListener('input', renderRecipeMetrics));
+  $('rec-rows').appendChild(row);
+}
+
+function readRecipeForm() {
+  const ingredientInputs = [...$('rec-rows').querySelectorAll('tr')].map((tr) => ({
+    id: uid('rin'),
+    sourceId: tr.querySelector('.src-id').value,
+    sourceNameSnapshot: state.ingredients.find((i) => i.id === tr.querySelector('.src-id').value)?.name || '',
+    quantityUsed: Math.max(0, n(tr.querySelector('.qty').value, 0)),
+    useUnit: tr.querySelector('.unit').value,
+    calculatedCost: n(tr.querySelector('.cost').dataset.value, 0),
+  })).filter((r) => r.sourceId && r.quantityUsed > 0);
+
+  return {
+    id: state.editRecipeId || uid('rec'),
+    name: t($('rec-name').value),
+    category: t($('rec-category').value),
+    yieldQuantity: Math.max(0.01, n($('rec-yield-qty').value, 1)),
+    yieldUnit: $('rec-yield-unit').value,
+    ingredientInputs,
+    notes: t($('rec-notes').value),
+    totalBatchCost: 0,
+    costPerYieldUnit: 0,
+    createdAt: state.editRecipeId ? state.recipes.find((r) => r.id === state.editRecipeId)?.createdAt || now() : now(),
+    updatedAt: now(),
+  };
+}
+
+function renderRecipeMetrics() {
+  const recipe = readRecipeForm();
+  const metrics = recipeMetrics(recipe);
+  [...$('rec-rows').querySelectorAll('tr')].forEach((tr, idx) => {
+    const val = metrics.rows[idx]?.calculatedCost || 0;
+    const el = tr.querySelector('.cost');
+    el.textContent = money(val);
+    el.dataset.value = String(val);
+  });
+  $('rec-metrics').innerHTML = `Total Batch Cost: <strong>${money(metrics.totalBatchCost)}</strong> · Cost per ${recipe.yieldUnit}: <strong>${money(metrics.costPerYieldUnit)}</strong>`;
+}
+
+function setRecipeForm(recipe = null) {
+  state.editRecipeId = recipe?.id || null;
+  $('rec-name').value = recipe?.name || '';
+  $('rec-category').value = recipe?.category || '';
+  $('rec-yield-qty').value = recipe?.yieldQuantity || 1;
+  $('rec-yield-unit').value = recipe?.yieldUnit || 'unit';
+  $('rec-notes').value = recipe?.notes || '';
+  $('rec-rows').innerHTML = '';
+  (recipe?.ingredientInputs?.length ? recipe.ingredientInputs : [{}]).forEach((r) => addRecipeRow(r.sourceId ? r : null));
+  renderRecipeMetrics();
+}
+
+function renderRecipes() {
+  $('rec-list').innerHTML = state.recipes.map((r) => {
+    const m = recipeMetrics(r);
+    return `<li><strong>${r.name}</strong> (${r.category || '—'}) · Batch ${money(m.totalBatchCost)} · ${money(m.costPerYieldUnit)}/${r.yieldUnit}
+      <button class="btn" data-rec-edit="${r.id}">Edit</button>
+      <button class="btn danger" data-rec-del="${r.id}">Delete</button></li>`;
+  }).join('') || '<li>No recipes yet.</li>';
+}
+
+function fillDishSourceOptions(row) {
+  const type = row.querySelector('.src-type').value;
+  const sel = row.querySelector('.src-id');
+  const items = type === 'ingredient' ? state.ingredients : state.recipes;
+  sel.innerHTML = '<option value="">Select source</option>' + items.map((i) => `<option value="${i.id}">${i.name}</option>`).join('');
+}
+function addDishRow(data = null) {
+  const row = $('dish-row-template').content.firstElementChild.cloneNode(true);
+  if (data?.sourceType) row.querySelector('.src-type').value = data.sourceType;
+  fillDishSourceOptions(row);
+  if (data) {
+    row.querySelector('.src-id').value = data.sourceId;
+    row.querySelector('.qty').value = data.quantityUsed;
+    row.querySelector('.unit').value = data.useUnit;
+  }
+  row.querySelector('.src-type').addEventListener('change', () => { fillDishSourceOptions(row); renderDishMetrics(); });
+  row.querySelector('.remove').addEventListener('click', () => { row.remove(); renderDishMetrics(); });
+  row.querySelectorAll('select,input').forEach((el) => el.addEventListener('input', renderDishMetrics));
+  $('dish-rows').appendChild(row);
+}
+
+function readDishForm() {
+  const components = [...$('dish-rows').querySelectorAll('tr')].map((tr) => {
+    const sourceType = tr.querySelector('.src-type').value;
+    const sourceId = tr.querySelector('.src-id').value;
+    const source = sourceType === 'ingredient' ? state.ingredients.find((i) => i.id === sourceId) : state.recipes.find((r) => r.id === sourceId);
+    return {
+      id: uid('cmp'),
+      sourceType,
+      sourceId,
+      sourceNameSnapshot: source?.name || '',
+      quantityUsed: Math.max(0, n(tr.querySelector('.qty').value, 0)),
+      useUnit: tr.querySelector('.unit').value,
+      calculatedCost: n(tr.querySelector('.cost').dataset.value, 0),
+    };
+  }).filter((c) => c.sourceId && c.quantityUsed > 0);
+
+  return {
+    id: state.editDishId || uid('dish'),
+    name: t($('dish-name').value),
+    category: t($('dish-category').value),
+    active: $('dish-active').value === 'true',
+    components,
+    packagingCostPerPortion: Math.max(0, n($('dish-packaging').value, 0)),
+    targetFoodCostPercent: Math.max(0.01, n($('dish-target').value, 30)),
+    vatRatePercent: Math.max(0, n($('dish-vat').value, 20)),
+    deliveryCommissionPercent: Math.max(0, n($('dish-delivery').value, 30)),
+    roundingRule: Math.max(0.01, n($('dish-rounding').value, 0.25)),
+    currentSellingPrice: Math.max(0, n($('dish-price').value, 0)),
+    manualPriceOverride: Math.max(0, n($('dish-manual').value, 0)) || '',
+    unitsSold: Math.max(0, Math.round(n($('dish-units').value, 0))),
+    reportingPeriod: t($('dish-period').value) || 'Last 30 Days',
+    notes: t($('dish-notes').value),
+    createdAt: state.editDishId ? state.dishes.find((d) => d.id === state.editDishId)?.createdAt || now() : now(),
+    updatedAt: now(),
+  };
+}
+
+function renderDishMetrics() {
+  const dish = readDishForm();
+  const metrics = dishMetrics(dish);
+  [...$('dish-rows').querySelectorAll('tr')].forEach((tr, idx) => {
+    const val = metrics.components[idx]?.calculatedCost || 0;
+    const el = tr.querySelector('.cost');
+    el.textContent = money(val);
+    el.dataset.value = String(val);
+  });
+  $('dish-metrics').innerHTML = `Total Portion Cost: <strong>${money(metrics.totalPortionCost)}</strong> · Suggested: <strong>${money(metrics.suggestedPrice)}</strong> · Rounded: <strong>${money(metrics.roundedPrice)}</strong> · Actual Food Cost: <strong>${metrics.foodCostPercent.toFixed(2)}%</strong> · Revenue: <strong>${money(metrics.revenue)}</strong>`;
+}
+
+function setDishForm(dish = null) {
+  state.editDishId = dish?.id || null;
+  $('dish-name').value = dish?.name || '';
+  $('dish-category').value = dish?.category || '';
+  $('dish-active').value = String(dish?.active ?? true);
+  $('dish-packaging').value = dish?.packagingCostPerPortion ?? 0;
+  $('dish-target').value = dish?.targetFoodCostPercent ?? 30;
+  $('dish-vat').value = dish?.vatRatePercent ?? 20;
+  $('dish-delivery').value = dish?.deliveryCommissionPercent ?? 30;
+  $('dish-rounding').value = dish?.roundingRule ?? 0.25;
+  $('dish-price').value = dish?.currentSellingPrice ?? '';
+  $('dish-manual').value = dish?.manualPriceOverride ?? '';
+  $('dish-units').value = dish?.unitsSold ?? 0;
+  $('dish-period').value = dish?.reportingPeriod || 'Last 30 Days';
+  $('dish-notes').value = dish?.notes || '';
+  $('dish-rows').innerHTML = '';
+  (dish?.components?.length ? dish.components : [{}]).forEach((c) => addDishRow(c.sourceId ? c : null));
+  renderDishMetrics();
+}
+
+function renderDishes() {
+  const evaluated = classifyDishes(state.dishes.map((d) => ({ ...d, ...dishMetrics(d) })));
+  $('dish-list').innerHTML = evaluated.map((d) => `<li><strong>${d.name}</strong> · ${d.classification} · Price ${money(d.effectivePrice)} · FC ${d.foodCostPercent.toFixed(2)}%
+    <button class="btn" data-dish-edit="${d.id}">Edit</button>
+    <button class="btn danger" data-dish-del="${d.id}">Delete</button></li>`).join('') || '<li>No dishes yet.</li>';
+}
+
+function renderHome() {
+  const dishes = classifyDishes(state.dishes.map((d) => ({ ...d, ...dishMetrics(d) })));
+  const active = dishes.filter((d) => d.active);
+  const totals = {
+    dishes: active.length,
+    revenue: active.reduce((s, d) => s + d.revenue, 0),
+    gp: active.reduce((s, d) => s + d.totalGrossProfit, 0),
+    avgFc: active.length ? active.reduce((s, d) => s + d.foodCostPercent, 0) / active.length : 0,
+  };
+  $('home-kpis').innerHTML = [
+    ['Active Dishes', totals.dishes],
+    ['Revenue', money(totals.revenue)],
+    ['Total Gross Profit', money(totals.gp)],
+    ['Avg Food Cost %', `${totals.avgFc.toFixed(2)}%`],
+  ].map(([k, v]) => `<div class="kpi"><span>${k}</span><strong>${v}</strong></div>`).join('');
+
+  const risky = dishes.filter((d) => d.foodCostPercent > d.targetFoodCostPercent || d.classification === 'Dog').slice(0, 5);
+  $('home-attention').innerHTML = risky.length
+    ? risky.map((d) => `<li><strong>${d.name}</strong>: ${d.classification}, FC ${d.foodCostPercent.toFixed(2)}% (target ${d.targetFoodCostPercent}%).</li>`).join('')
+    : '<li>No urgent dish flags right now.</li>';
+}
+
+function actionForDish(d) {
+  if (d.foodCostPercent > d.targetFoodCostPercent + 5) return 'Reprice or reduce component cost';
+  if (d.classification === 'Dog') return 'Test redesign or remove';
+  if (d.classification === 'Puzzle') return 'Promote placement/visibility';
+  if (d.classification === 'Plowhorse') return 'Try small price lift';
+  return 'Maintain and monitor';
+}
+
+function renderAnalysis() {
+  const dishes = classifyDishes(state.dishes.map((d) => ({ ...d, ...dishMetrics(d) })));
+  $('analysis-body').innerHTML = dishes.map((d) => `<tr><td>${d.name}</td><td>${d.classification}</td><td>${money(d.effectivePrice)}</td><td>${d.foodCostPercent.toFixed(2)}%</td><td>${d.unitsSold}</td><td>${money(d.revenue)}</td><td>${money(d.totalGrossProfit)}</td><td>${actionForDish(d)}</td></tr>`).join('') || '<tr><td colspan="8">No dishes available.</td></tr>';
+}
 
 function createSnapshot() {
-  const name = cleanText(dom.snapshotName.value); if (!name) return setInlineMessage(dom.snapshotFeedback, 'Snapshot name is required.');
-  const periodLabel = cleanText(dom.snapshotPeriod.value || dom.fields.reportingPeriod.value || 'Mixed Periods');
-  const notes = cleanText(dom.snapshotNotes.value);
-  const snap = snapshotFromItems(name, periodLabel, notes);
-  state.snapshots.unshift(snap); persistAll(); renderSnapshotSelectors(); renderSnapshotList();
-  dom.snapshotName.value = ''; dom.snapshotPeriod.value = ''; dom.snapshotNotes.value = '';
-  setInlineMessage(dom.snapshotFeedback, `Snapshot "${snap.name}" created.`, 'success');
-  renderDashboard();
-}
-function findPeriodBySelector(value) {
-  if (value === 'live') {
-    const metrics = state.recipes.map((r) => calculateRecipeMetrics(r, { suppressWarnings: true }));
-    const items = classifyMenuItems(metrics).items.map((i) => ({ ...i, flags: getItemFlags(i), action: recommendedAction(i) }));
-    return { label: 'Current Live', items };
-  }
-  const snap = state.snapshots.find((s) => s.id === value);
-  return snap ? { label: `${snap.name} (${snap.periodLabel})`, items: snap.items } : null;
-}
-function runComparison() {
-  const left = findPeriodBySelector(dom.compareLeft.value); const right = findPeriodBySelector(dom.compareRight.value);
-  if (!left || !right) return setInlineMessage(dom.snapshotFeedback, 'Please select valid periods for comparison.');
-  if (dom.compareLeft.value === dom.compareRight.value) return setInlineMessage(dom.snapshotFeedback, 'Pick two different periods.');
-  state.comparison = { ...comparePeriods(left.items, right.items), leftLabel: left.label, rightLabel: right.label, notes: cleanText(dom.comparisonNotes.value) };
-  localStorage.setItem(STORAGE_KEYS.compareNotes, state.comparison.notes || '');
-  setInlineMessage(dom.snapshotFeedback, `Comparison ready: ${left.label} → ${right.label}.`, 'success');
-  renderDashboard();
-}
-function clearComparison() { state.comparison = null; dom.comparisonNotes.value = ''; localStorage.removeItem(STORAGE_KEYS.compareNotes); renderDashboard(); setInlineMessage(dom.snapshotFeedback, 'Comparison cleared.', 'success'); }
-
-function csvEscape(v) { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; }
-function downloadCsv(filename, headers, rows) {
-  if (!rows.length) return setInlineMessage(dom.snapshotFeedback, 'No rows available for CSV export.');
-  const csv = [headers.join(','), ...rows.map((r) => headers.map((h) => csvEscape(r[h])).join(','))].join('\n');
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = filename; a.click(); URL.revokeObjectURL(a.href);
-}
-function exportCurrentCsv() {
-  const items = state.menuEngine?.items || classifyMenuItems(state.recipes.map((r) => calculateRecipeMetrics(r, { suppressWarnings: true }))).items;
-  const period = cleanText(dom.fields.reportingPeriod.value) || 'Mixed';
-  downloadCsv('menu-current-analysis.csv',
-    ['periodLabel', 'name', 'category', 'classification', 'isActive', 'effectiveMenuPrice', 'roundedSellingPrice', 'unitsSold', 'revenue', 'grossProfitPerPortion', 'totalGrossProfit', 'foodCostPercent', 'flags', 'action', 'updatedAt'],
-    items.map((i) => ({ periodLabel: period, name: i.name, category: i.category, classification: i.classification, isActive: i.isActive, effectiveMenuPrice: i.effectiveMenuPrice.toFixed(2), roundedSellingPrice: i.roundedSellingPrice.toFixed(2), unitsSold: i.unitsSold, revenue: i.revenue.toFixed(2), grossProfitPerPortion: i.grossProfitPerPortion.toFixed(2), totalGrossProfit: i.totalGrossProfit.toFixed(2), foodCostPercent: i.foodCostPercent.toFixed(2), flags: getItemFlags(i).join(' | '), action: recommendedAction(i), updatedAt: i.updatedAt || '' })),
-  );
-}
-function exportComparisonCsv() {
-  if (!state.comparison) return setInlineMessage(dom.snapshotFeedback, 'Run comparison before exporting.');
-  const rows = state.comparison.rows.map((r) => ({ comparisonFrom: state.comparison.leftLabel, comparisonTo: state.comparison.rightLabel, name: r.name, oldClassification: r.oldClassification, newClassification: r.newClassification, movementType: r.movementType, priceChange: r.priceChange.toFixed(2), unitsChange: r.unitsChange, revenueChange: r.revenueChange.toFixed(2), profitChange: r.profitChange.toFixed(2), foodCostChange: r.foodCostChange.toFixed(2), movement: r.movement, severity: r.severity, action: r.action }));
-  downloadCsv('snapshot-comparison.csv', ['comparisonFrom', 'comparisonTo', 'name', 'oldClassification', 'newClassification', 'movementType', 'priceChange', 'unitsChange', 'revenueChange', 'profitChange', 'foodCostChange', 'movement', 'severity', 'action'], rows);
-}
-function reviewSummaryText() {
-  const totals = totalsFromItems((state.menuEngine?.items || []).map((i) => ({ ...i, action: recommendedAction(i), flags: getItemFlags(i) })));
-  const lines = [
-    `Menu Price Engine Stage 4 Review`,
-    `Active items: ${totals.activeItems} | Units: ${fmtInt(totals.totalUnits)} | Revenue: ${fmtCurrency(totals.totalRevenue)} | Gross Profit: ${fmtCurrency(totals.totalGrossProfit)}`,
-    `Stars: ${totals.stars}, Plowhorses: ${totals.plowhorses}, Puzzles: ${totals.puzzles}, Dogs: ${totals.dogs}`,
-  ];
-  const priorityPreview = dom.priorityList ? [...dom.priorityList.querySelectorAll('li')].slice(0, 5).map((li) => li.textContent.trim()) : [];
-  if (priorityPreview.length) lines.push(`Top priorities:\n- ${priorityPreview.join('\n- ')}`);
-  if (state.comparison) lines.push(`Comparison: ${state.comparison.leftLabel} -> ${state.comparison.rightLabel}; Revenue delta ${fmtCurrency(state.comparison.summary.revenueDelta)}, GP delta ${fmtCurrency(state.comparison.summary.grossProfitDelta)}, Class changes ${state.comparison.summary.changedClasses}.`);
-  if (state.comparison?.notes) lines.push(`Comparison notes: ${state.comparison.notes}`);
-  if (state.snapshots.length) lines.push(`Snapshot history: ${state.snapshots.length} total. Latest: ${state.snapshots.slice().sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))[0].name}.`);
-  else lines.push('Snapshot history: none yet.');
-  return lines.join('\n');
+  const name = t($('snap-name').value);
+  if (!name) return;
+  const periodLabel = t($('snap-period').value) || 'Unspecified';
+  const items = classifyDishes(state.dishes.map((d) => ({ ...d, ...dishMetrics(d) })));
+  state.snapshots.unshift({ id: uid('snap'), name, periodLabel, createdAt: now(), items });
+  persist();
+  renderReports();
 }
 
+function renderReports() {
+  $('snap-list').innerHTML = state.snapshots.map((s) => `<li><strong>${s.name}</strong> (${s.periodLabel}) · ${new Date(s.createdAt).toLocaleString()} · ${s.items.length} dishes</li>`).join('') || '<li>No snapshots yet.</li>';
+  const current = classifyDishes(state.dishes.map((d) => ({ ...d, ...dishMetrics(d) })));
+  const totalRev = current.reduce((a, b) => a + b.revenue, 0);
+  const totalGp = current.reduce((a, b) => a + b.totalGrossProfit, 0);
+  $('report-summary').innerHTML = `Current Dish Revenue: <strong>${money(totalRev)}</strong> · Current Dish GP: <strong>${money(totalGp)}</strong> · Snapshots: <strong>${state.snapshots.length}</strong>`;
+}
 
-function defaultReviewName() {
-  const d = new Date();
-  return `Weekly Review ${d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}`;
+function renderWeekly() {
+  const dishes = classifyDishes(state.dishes.map((d) => ({ ...d, ...dishMetrics(d) })));
+  $('weekly-items').innerHTML = dishes.map((d) => `<label><input type="checkbox" data-weekly-dish="${d.id}" /> ${d.name} (${d.classification})</label>`).join('') || 'No dishes available.';
+  $('weekly-log').innerHTML = state.weeklyReviews.map((w) => `<li><strong>${w.name}</strong> · ${new Date(w.createdAt).toLocaleString()} · ${w.decisions.length} decisions</li>`).join('') || '<li>No weekly reviews saved.</li>';
 }
-function persistWeeklyDraft() { setStored(STORAGE_KEYS.weeklyDraft, state.weeklyReview); }
-function ensureWeeklyDefaults() {
-  state.weeklyReview = { step: 1, started: false, name: defaultReviewName(), notes: '', snapshotId: '', focusItemIds: [], decisions: [], comparisonNotes: '', improvedNote: '', declinedNote: '', previousEvaluation: [], ...state.weeklyReview };
-}
-function validateDataCheck() {
-  const metrics = state.recipes.map((r) => calculateRecipeMetrics(r, { suppressWarnings: true }));
-  const missingUnits = metrics.filter((r) => !(toNumber(r.unitsSold, 0) > 0)).map((r) => r.name || '(Untitled)');
-  const missingPrice = metrics.filter((r) => !(toNumber(r.sellingPrice, 0) > 0)).map((r) => r.name || '(Untitled)');
-  return { missingUnits, missingPrice };
-}
-function weeklyCurrentItems() {
-  const metrics = state.recipes.map((r) => calculateRecipeMetrics(r, { suppressWarnings: true }));
-  return classifyMenuItems(metrics).items.map((i) => ({ ...i, flags: getItemFlags(i), action: recommendedAction(i) }));
-}
-function suggestFocusItems(items) {
-  const groups = {
-    Star: items.filter((i) => i.classification === 'Star').sort((a, b) => b.totalGrossProfit - a.totalGrossProfit),
-    Plowhorse: items.filter((i) => i.classification === 'Plowhorse').sort((a, b) => b.unitsSold - a.unitsSold),
-    Puzzle: items.filter((i) => i.classification === 'Puzzle').sort((a, b) => b.grossProfitPerPortion - a.grossProfitPerPortion),
-    Dog: items.filter((i) => i.classification === 'Dog').sort((a, b) => a.totalGrossProfit - b.totalGrossProfit),
-  };
-  const picked = [];
-  ['Star', 'Plowhorse', 'Puzzle'].forEach((k) => { if (groups[k][0]) picked.push(groups[k][0]); });
-  groups.Star.slice(1, 2).forEach((i) => picked.push(i));
-  groups.Dog.slice(0, 1).forEach((i) => picked.push(i));
-  return [...new Map(picked.map((i) => [i.id, i])).values()].slice(0, 5);
-}
-function gotoWeeklyStep(step) {
-  const maxStep = state.weeklyReview.started ? 9 : 1;
-  state.weeklyReview.step = clamp(step, 1, maxStep);
-  persistWeeklyDraft();
-  renderWeeklyReview();
-}
-function weeklySummaryText() {
-  const currentItems = weeklyCurrentItems();
-  const selected = currentItems.filter((i) => state.weeklyReview.focusItemIds.includes(i.id));
-  const decisionLines = selected.map((i, idx) => {
-    const d = state.weeklyReview.decisions.find((x) => x.itemId === i.id) || {};
-    return `${idx + 1}. ${i.name} (${i.classification}) — ${d.action || 'Action not set'}${d.notes ? ` · ${d.notes}` : ''}`;
-  });
-  return [
-    `${state.weeklyReview.name}`,
-    `Date: ${new Date().toLocaleDateString('en-GB')}`,
-    state.weeklyReview.notes ? `Notes: ${state.weeklyReview.notes}` : 'Notes: none',
-    state.weeklyReview.improvedNote ? `Improved: ${state.weeklyReview.improvedNote}` : 'Improved: n/a',
-    state.weeklyReview.declinedNote ? `Declined: ${state.weeklyReview.declinedNote}` : 'Declined: n/a',
-    state.weeklyReview.comparisonNotes ? `Comparison notes: ${state.weeklyReview.comparisonNotes}` : 'Comparison notes: none',
-    'Decisions:',
-    decisionLines.length ? decisionLines.join('\n') : '- No focus items selected',
-  ].join('\n');
-}
-function renderWeeklySummaryPanel() {
-  dom.weekly.summaryOutput.innerHTML = `
-    <h4>Review summary</h4>
-    <p class="helper-text">Ready to save when this looks right.</p>
-    <ul>${weeklySummaryText().split('\n').filter(Boolean).map((line) => `<li>${line}</li>`).join('')}</ul>
-  `;
-}
-function saveWeeklyReview() {
-  if (!state.weeklyReview.decisions.length) { setInlineMessage(dom.weekly.feedback, 'Add at least one item decision before saving.'); return false; }
-  const review = {
+
+function saveWeekly() {
+  const selected = [...document.querySelectorAll('[data-weekly-dish]:checked')].map((el) => el.dataset.weeklyDish);
+  const dishes = classifyDishes(state.dishes.map((d) => ({ ...d, ...dishMetrics(d) })));
+  const decisions = dishes.filter((d) => selected.includes(d.id)).map((d) => ({
+    dishId: d.id,
+    dishName: d.name,
+    classification: d.classification,
+    recommendedAction: actionForDish(d),
+  }));
+  state.weeklyReviews.unshift({
     id: uid('wrev'),
-    name: state.weeklyReview.name,
-    createdAt: nowIso(),
-    snapshotId: state.weeklyReview.snapshotId || '',
-    decisions: state.weeklyReview.decisions,
-    notes: {
-      start: state.weeklyReview.notes,
-      improved: state.weeklyReview.improvedNote,
-      declined: state.weeklyReview.declinedNote,
-      comparison: state.weeklyReview.comparisonNotes,
-    },
-    selectedItems: state.weeklyReview.focusItemIds,
-    previousEvaluation: state.weeklyReview.previousEvaluation,
-    summary: weeklySummaryText(),
-  };
-  state.weeklyReviews.unshift(review);
-  setStored(STORAGE_KEYS.weeklyReviews, state.weeklyReviews);
-  persistWeeklyDraft();
-  setInlineMessage(dom.weekly.feedback, `Weekly review "${review.name}" saved.`, 'success');
-  return true;
-}
-function renderWeeklyReview() {
-  ensureWeeklyDefaults();
-  const wr = state.weeklyReview;
-  dom.weekly.status.textContent = wr.started ? `Step ${wr.step} of 9` : 'Not started';
-  dom.weekly.name.value = wr.name;
-  dom.weekly.notes.value = wr.notes;
-  dom.weekly.improvedNote.value = wr.improvedNote || '';
-  dom.weekly.declinedNote.value = wr.declinedNote || '';
-  dom.weekly.comparisonNotes.value = wr.comparisonNotes || '';
-  const chips = WEEKLY_STEPS.map((label, i) => {
-    const stepNum = i + 1;
-    const classes = ['weekly-step-chip', wr.step === stepNum ? 'active' : '', wr.step > stepNum ? 'done' : ''].filter(Boolean).join(' ');
-    return `<button type="button" data-weekly-nav="${stepNum}" class="${classes}" ${(!wr.started && stepNum > 1) ? 'disabled' : ''}><strong>${stepNum}. ${label}</strong></button>`;
+    name: `Weekly Review ${new Date().toLocaleDateString('en-GB')}`,
+    createdAt: now(),
+    notes: t($('weekly-notes').value),
+    decisions,
   });
-  dom.weekly.stepIndicator.innerHTML = chips.join('');
-  dom.weekly.steps.forEach((el) => el.classList.toggle('active', Number(el.dataset.weeklyStep) === wr.step));
-
-  const last = state.weeklyReviews[0];
-  dom.weekly.lastReview.innerHTML = last ? `<strong>Last Review:</strong> ${last.name} (${shortDateTime(last.createdAt)})<br/><span class="helper-text">${(last.decisions || []).slice(0, 4).map((d) => `${d.itemName}: ${d.action}`).join(' · ') || 'No decisions recorded.'}</span>` : '<span class="helper-text">No previous weekly review yet.</span>';
-
-  const check = validateDataCheck();
-  const checkCards = [];
-  checkCards.push(check.missingPrice.length
-    ? `<div class="weekly-check-item warn"><h4>Missing selling prices (${check.missingPrice.length})</h4><ul class="weekly-check-list">${check.missingPrice.map((n) => `<li>${n}</li>`).join('')}</ul></div>`
-    : '<div class="weekly-check-item good"><h4>Selling prices look complete</h4><p class="helper-text">Every active item has a selling price.</p></div>');
-  checkCards.push(check.missingUnits.length
-    ? `<div class="weekly-check-item warn"><h4>Missing units sold (${check.missingUnits.length})</h4><ul class="weekly-check-list">${check.missingUnits.map((n) => `<li>${n}</li>`).join('')}</ul></div>`
-    : '<div class="weekly-check-item good"><h4>Units sold look complete</h4><p class="helper-text">Every active item has unit sales data.</p></div>');
-  checkCards.push('<div class="weekly-check-item"><h4>Can I continue?</h4><p class="helper-text">Yes. Continue if data gaps are expected this week; just note them in your summary.</p></div>');
-  dom.weekly.dataCheckList.innerHTML = checkCards.join('');
-
-  const currentItems = weeklyCurrentItems();
-  const priorSnapshot = state.snapshots.slice().sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))[0];
-  const comp = priorSnapshot ? comparePeriods(priorSnapshot.items, currentItems) : null;
-  dom.weekly.comparisonSummary.innerHTML = comp ? `Comparing latest snapshot <strong>${priorSnapshot.name}</strong> to current live data. Improved: ${comp.summary.improved}, Worsened: ${comp.summary.worsened}, Revenue Δ ${fmtCurrency(comp.summary.revenueDelta)}.` : 'No snapshot available yet. Create one in Step 3.';
-
-  if (!wr.focusItemIds.length) wr.focusItemIds = suggestFocusItems(currentItems).map((i) => i.id);
-  const suggestedIds = new Set(suggestFocusItems(currentItems).map((i) => i.id));
-  const byClass = ['Star', 'Plowhorse', 'Puzzle', 'Dog'].map((cls) => ({ cls, items: currentItems.filter((i) => i.classification === cls) })).filter((g) => g.items.length);
-  dom.weekly.focusList.innerHTML = byClass.map((group) => `
-    <div class="weekly-focus-group">
-      <h4 class="weekly-focus-group-title">${group.cls}s</h4>
-      ${group.items.map((i) => {
-    const checked = wr.focusItemIds.includes(i.id) ? 'checked' : '';
-    const selected = wr.focusItemIds.includes(i.id) ? 'selected' : '';
-    const suggested = suggestedIds.has(i.id) ? '<span class="count-pill">Suggested</span>' : '';
-    return `<label class="weekly-focus-item ${selected}">
-      <div class="weekly-focus-head"><span><input type="checkbox" data-focus-id="${i.id}" ${checked}/> <strong>${i.name}</strong></span><span>${suggested} <span class="badge badge-${i.classification.toLowerCase()}">${i.classification}</span></span></div>
-      <div class="weekly-metrics"><span>Total GP ${fmtCurrency(i.totalGrossProfit)}</span><span>GP/Portion ${fmtCurrency(i.grossProfitPerPortion)}</span><span>Food Cost ${fmtPercent(i.foodCostPercent)}</span><span>Units ${fmtInt(i.unitsSold)}</span></div>
-    </label>`;
-  }).join('')}
-    </div>`).join('');
-
-  const selected = currentItems.filter((i) => wr.focusItemIds.includes(i.id));
-  wr.decisions = wr.decisions.filter((d) => wr.focusItemIds.includes(d.itemId));
-  selected.forEach((i) => {
-    if (!wr.decisions.some((d) => d.itemId === i.id)) wr.decisions.push({ itemId: i.id, itemName: i.name, action: 'Promote', notes: '' });
-  });
-  const options = ['Promote', 'Increase Price', 'Reduce Cost', 'Improve Visibility', 'Remove / Redesign'];
-  dom.weekly.decisionsList.innerHTML = selected.length ? selected.map((i) => {
-    const d = wr.decisions.find((x) => x.itemId === i.id);
-    return `<div class="weekly-decision-item" data-decision-id="${i.id}"><div class="weekly-focus-head"><h4>${i.name}</h4><span class="badge badge-${i.classification.toLowerCase()}">${i.classification}</span></div><div class="weekly-metrics"><span>Total GP ${fmtCurrency(i.totalGrossProfit)}</span><span>GP/Portion ${fmtCurrency(i.grossProfitPerPortion)}</span><span>Food Cost ${fmtPercent(i.foodCostPercent)}</span><span>Units ${fmtInt(i.unitsSold)}</span></div><label class="field"><span>Action</span><select data-action-id="${i.id}">${options.map((o) => `<option value="${o}" ${d.action === o ? 'selected' : ''}>${o}</option>`).join('')}</select></label><label class="field"><span>Notes (optional)</span><input data-note-id="${i.id}" type="text" value="${d.notes || ''}" placeholder="Short reason or execution note"/></label></div>`;
-  }).join('') : '<div class="helper-text">Select at least 1 focus item in Step 5.</div>';
-
-  renderWeeklySummaryPanel();
-
-  const prev = state.weeklyReviews[0];
-  dom.weekly.evaluationList.innerHTML = prev && prev.decisions?.length ? prev.decisions.map((d) => {
-    const existing = wr.previousEvaluation.find((x) => x.itemId === d.itemId)?.status || 'Needs adjustment';
-    return `<div class="weekly-eval-item" data-eval-id="${d.itemId}"><div class="weekly-eval-header"><strong>${d.itemName}</strong><span class="helper-text">Last action: ${d.action}</span></div><label class="field"><span>Outcome this week</span><select data-eval-select="${d.itemId}"><option ${existing === 'Worked' ? 'selected' : ''}>Worked</option><option ${existing === 'Didn’t work' ? 'selected' : ''}>Didn’t work</option><option ${existing === 'Needs adjustment' ? 'selected' : ''}>Needs adjustment</option></select></label></div>`;
-  }).join('') : '<div class="helper-text">No prior decisions to evaluate yet.</div>';
-  persistWeeklyDraft();
+  persist();
+  renderWeekly();
 }
 
 function bindEvents() {
-  bindModeEvents();
-  dom.actions.addRow.addEventListener('click', () => { addRowToDom(defaultIngredientRow()); recalcAndRender(); });
-  dom.actions.save.addEventListener('click', () => upsertRecipe('save')); dom.actions.update.addEventListener('click', () => upsertRecipe('update')); dom.actions.duplicate.addEventListener('click', duplicateRecipe); dom.actions.del.addEventListener('click', deleteRecipe); dom.actions.reset.addEventListener('click', resetRecipeForm); dom.actions.newRecipe.addEventListener('click', resetRecipeForm);
-  dom.recipeSearch.addEventListener('input', (e) => { state.recipeSearch = e.target.value; renderRecipeList(); });
-  dom.recipeStatusFilter.addEventListener('change', (e) => { state.recipeStatusFilter = e.target.value; renderRecipeList(); });
-  Object.values(dom.fields).forEach((el) => { el.addEventListener('input', recalcAndRender); el.addEventListener('change', recalcAndRender); });
-  dom.analysisSearch.addEventListener('input', (e) => { state.analysisSearch = e.target.value; renderDashboard(); }); dom.analysisClassFilter.addEventListener('change', (e) => { state.analysisClassFilter = e.target.value; renderDashboard(); });
-  dom.analysisTable.querySelectorAll('th[data-sort]').forEach((th) => th.addEventListener('click', () => { const k = th.dataset.sort; if (state.sort.key === k) state.sort.dir = state.sort.dir === 'asc' ? 'desc' : 'asc'; else state.sort = { key: k, dir: 'asc' }; renderDashboard(); }));
-  dom.compareSearch.addEventListener('input', (e) => { state.compareSearch = e.target.value; renderComparisonTable(); }); dom.compareMovementFilter.addEventListener('change', (e) => { state.compareMovementFilter = e.target.value; renderComparisonTable(); });
-  dom.comparisonTable.querySelectorAll('th[data-csort]').forEach((th) => th.addEventListener('click', () => { const k = th.dataset.csort; if (state.csort.key === k) state.csort.dir = state.csort.dir === 'asc' ? 'desc' : 'asc'; else state.csort = { key: k, dir: 'desc' }; renderComparisonTable(); }));
-
-  dom.library.search.addEventListener('input', (e) => { state.ingredientSearch = e.target.value; renderIngredientLibrary(); });
-  dom.library.add.addEventListener('click', () => {
-    const i = readIngredientForm(); if (!i.name || i.packSize <= 0 || i.purchasePrice < 0 || !PACK_UNITS.includes(i.packUnit)) return setInlineMessage(dom.library.errors, 'Valid ingredient fields are required.');
-    if (state.ingredients.some((x) => safeLower(x.name) === safeLower(i.name))) return setInlineMessage(dom.library.errors, 'Ingredient already exists.');
-    state.ingredients.push({ id: uid('ing'), ...i }); persistAll(); clearIngredientForm(); renderIngredientLibrary(); refreshRowIngredientOptions();
-  });
-  dom.library.update.addEventListener('click', () => {
-    if (!state.ingredientEditingId) return setInlineMessage(dom.library.errors, 'Select ingredient to update.'); const i = readIngredientForm();
-    state.ingredients = state.ingredients.map((x) => x.id === state.ingredientEditingId ? { ...x, ...i } : x); persistAll(); clearIngredientForm(); renderIngredientLibrary(); refreshRowIngredientOptions();
-  });
-  dom.library.clear.addEventListener('click', clearIngredientForm);
-  dom.library.body.addEventListener('click', (e) => {
-    const btn = e.target.closest('button[data-action]'); if (!btn) return; const ing = state.ingredients.find((x) => x.id === btn.dataset.id); if (!ing) return;
-    if (btn.dataset.action === 'edit') { state.ingredientEditingId = ing.id; dom.library.name.value = ing.name; dom.library.price.value = ing.purchasePrice; dom.library.packSize.value = ing.packSize; dom.library.packUnit.value = ing.packUnit; dom.library.supplier.value = ing.supplier; dom.library.notes.value = ing.notes; return; }
-    if (window.confirm(`Delete ingredient "${ing.name}"?`)) { state.ingredients = state.ingredients.filter((x) => x.id !== ing.id); persistAll(); renderIngredientLibrary(); refreshRowIngredientOptions(); }
+  $('mode-nav').addEventListener('click', (e) => {
+    const tab = e.target.closest('[data-mode]');
+    if (!tab) return;
+    modeSwitch(tab.dataset.mode);
   });
 
-  dom.actions.createSnapshot.addEventListener('click', createSnapshot); dom.actions.runCompare.addEventListener('click', runComparison); dom.actions.clearCompare.addEventListener('click', clearComparison);
-  dom.actions.exportCurrentCsv.addEventListener('click', exportCurrentCsv); dom.actions.exportCompareCsv.addEventListener('click', exportComparisonCsv);
-  dom.actions.printSummary.addEventListener('click', () => window.print());
-  dom.actions.copySummary.addEventListener('click', async () => { try { await navigator.clipboard.writeText(reviewSummaryText()); setInlineMessage(dom.snapshotFeedback, 'Summary copied to clipboard.', 'success'); } catch { setInlineMessage(dom.snapshotFeedback, 'Clipboard not available in this browser context.'); } });
-
-  dom.weekly.stepIndicator.addEventListener('click', (e) => {
-    const btn = e.target.closest('[data-weekly-nav]'); if (!btn) return;
-    const step = toNumber(btn.dataset.weeklyNav, 1);
-    if (!state.weeklyReview.started && step > 1) return;
-    gotoWeeklyStep(step);
+  $('ing-save').addEventListener('click', () => {
+    const ingredient = {
+      id: state.editIngredientId || uid('ing'),
+      name: t($('ing-name').value),
+      purchasePrice: Math.max(0, n($('ing-price').value, 0)),
+      packSize: Math.max(0.0001, n($('ing-pack-size').value, 1)),
+      packUnit: $('ing-pack-unit').value,
+      supplier: t($('ing-supplier').value),
+      notes: t($('ing-notes').value),
+      createdAt: state.editIngredientId ? state.ingredients.find((i) => i.id === state.editIngredientId)?.createdAt || now() : now(),
+      updatedAt: now(),
+    };
+    if (!ingredient.name) return;
+    if (state.editIngredientId) state.ingredients = state.ingredients.map((i) => i.id === state.editIngredientId ? ingredient : i);
+    else state.ingredients.push(ingredient);
+    state.editIngredientId = null;
+    $('ing-reset').click();
+    persist(); renderAll();
   });
-  dom.weekly.startBtn.addEventListener('click', () => {
-    ensureWeeklyDefaults();
-    state.weeklyReview.started = true;
-    state.weeklyReview.name = cleanText(dom.weekly.name.value) || defaultReviewName();
-    state.weeklyReview.notes = cleanText(dom.weekly.notes.value);
-    persistWeeklyDraft();
-    gotoWeeklyStep(2);
+  $('ing-reset').addEventListener('click', () => {
+    state.editIngredientId = null;
+    ['ing-name', 'ing-price', 'ing-pack-size', 'ing-supplier', 'ing-notes'].forEach((id) => $(id).value = '');
+    $('ing-pack-unit').value = 'g';
   });
-  dom.weekly.continueDataBtn.addEventListener('click', () => gotoWeeklyStep(3));
-  dom.weekly.createSnapshotBtn.addEventListener('click', () => {
-    const snap = snapshotFromItems(`${state.weeklyReview.name} Snapshot`, cleanText(dom.fields.reportingPeriod.value || 'Weekly'), state.weeklyReview.notes, 'weekly-review');
-    state.snapshots.unshift(snap);
-    state.weeklyReview.snapshotId = snap.id;
-    persistAll();
-    renderSnapshotSelectors();
-    gotoWeeklyStep(4);
-  });
-  dom.weekly.autoSnapshotBtn.addEventListener('click', () => {
-    const snap = snapshotFromItems(`${state.weeklyReview.name} Auto Snapshot`, cleanText(dom.fields.reportingPeriod.value || 'Weekly'), state.weeklyReview.notes, 'weekly-auto');
-    state.snapshots.unshift(snap);
-    state.weeklyReview.snapshotId = snap.id;
-    persistAll();
-    renderSnapshotSelectors();
-    gotoWeeklyStep(4);
-  });
-  dom.weekly.continueComparisonBtn.addEventListener('click', () => {
-    state.weeklyReview.improvedNote = cleanText(dom.weekly.improvedNote.value);
-    state.weeklyReview.declinedNote = cleanText(dom.weekly.declinedNote.value);
-    state.weeklyReview.comparisonNotes = cleanText(dom.weekly.comparisonNotes.value);
-    persistWeeklyDraft();
-    gotoWeeklyStep(5);
-  });
-  dom.weekly.focusList.addEventListener('change', (e) => {
-    const el = e.target;
-    if (!el.matches('[data-focus-id]')) return;
-    const id = el.dataset.focusId;
-    const set = new Set(state.weeklyReview.focusItemIds);
-    if (el.checked) set.add(id); else set.delete(id);
-    state.weeklyReview.focusItemIds = [...set];
-    persistWeeklyDraft();
-    renderWeeklyReview();
-  });
-  dom.weekly.continueFocusBtn.addEventListener('click', () => {
-    if (!state.weeklyReview.focusItemIds.length) return setInlineMessage(dom.weekly.feedback, 'Select at least one focus item to continue.');
-    setInlineMessage(dom.weekly.feedback, '');
-    gotoWeeklyStep(6);
-  });
-  dom.weekly.decisionsList.addEventListener('input', (e) => {
-    const selId = e.target.dataset.actionId; const noteId = e.target.dataset.noteId;
-    if (selId) {
-      const d = state.weeklyReview.decisions.find((x) => x.itemId === selId); if (d) d.action = e.target.value;
+  $('ing-body').addEventListener('click', (e) => {
+    const edit = e.target.closest('[data-ing-edit]');
+    const del = e.target.closest('[data-ing-del]');
+    if (edit) {
+      const i = state.ingredients.find((x) => x.id === edit.dataset.ingEdit);
+      if (!i) return;
+      state.editIngredientId = i.id;
+      $('ing-name').value = i.name; $('ing-price').value = i.purchasePrice; $('ing-pack-size').value = i.packSize;
+      $('ing-pack-unit').value = i.packUnit; $('ing-supplier').value = i.supplier; $('ing-notes').value = i.notes;
     }
-    if (noteId) {
-      const d = state.weeklyReview.decisions.find((x) => x.itemId === noteId); if (d) d.notes = e.target.value;
+    if (del) {
+      state.ingredients = state.ingredients.filter((x) => x.id !== del.dataset.ingDel);
+      persist(); renderAll();
     }
-    persistWeeklyDraft();
-    renderWeeklySummaryPanel();
-  });
-  dom.weekly.continueDecisionsBtn.addEventListener('click', () => gotoWeeklyStep(7));
-  dom.weekly.continueSummaryBtn.addEventListener('click', () => gotoWeeklyStep(8));
-  dom.weekly.saveBtn.addEventListener('click', () => { if (saveWeeklyReview()) gotoWeeklyStep(9); });
-  dom.weekly.evaluationList.addEventListener('change', (e) => {
-    const id = e.target.dataset.evalSelect; if (!id) return;
-    const existing = state.weeklyReview.previousEvaluation.find((x) => x.itemId === id);
-    if (existing) existing.status = e.target.value;
-    else state.weeklyReview.previousEvaluation.push({ itemId: id, status: e.target.value });
-    persistWeeklyDraft();
-  });
-  dom.weekly.finishBtn.addEventListener('click', () => {
-    state.weeklyReview = { step: 1, started: false, name: defaultReviewName(), notes: '', snapshotId: '', focusItemIds: [], decisions: [], comparisonNotes: '', improvedNote: '', declinedNote: '', previousEvaluation: [] };
-    localStorage.removeItem(STORAGE_KEYS.weeklyDraft);
-    renderWeeklyReview();
-    setInlineMessage(dom.weekly.feedback, 'Cycle finished. Start next week review when ready.', 'success');
   });
 
-  dom.snapshotList.addEventListener('click', (e) => {
-    const viewBtn = e.target.closest('button[data-snapshot-view]'); const delBtn = e.target.closest('button[data-snapshot-delete]');
-    if (viewBtn) { const snap = state.snapshots.find((s) => s.id === viewBtn.dataset.snapshotView); if (!snap) return; state.comparison = { ...comparePeriods(snap.items, findPeriodBySelector('live').items), leftLabel: `${snap.name} (${snap.periodLabel})`, rightLabel: 'Current Live', notes: '' }; renderDashboard(); return; }
-    if (delBtn) { const snap = state.snapshots.find((s) => s.id === delBtn.dataset.snapshotDelete); if (!snap) return; if (!window.confirm(`Delete snapshot "${snap.name}"?`)) return; state.snapshots = state.snapshots.filter((s) => s.id !== snap.id); persistAll(); renderSnapshotSelectors(); renderSnapshotList(); setInlineMessage(dom.snapshotFeedback, 'Snapshot deleted.', 'success'); }
+  $('rec-add-row').addEventListener('click', () => addRecipeRow());
+  ['rec-name', 'rec-category', 'rec-yield-qty', 'rec-yield-unit', 'rec-notes'].forEach((id) => $(id).addEventListener('input', renderRecipeMetrics));
+  $('rec-save').addEventListener('click', () => {
+    const r = readRecipeForm();
+    if (!r.name) return;
+    const m = recipeMetrics(r);
+    r.totalBatchCost = m.totalBatchCost;
+    r.costPerYieldUnit = m.costPerYieldUnit;
+    if (state.editRecipeId) state.recipes = state.recipes.map((x) => x.id === state.editRecipeId ? r : x);
+    else state.recipes.push(r);
+    setRecipeForm(null);
+    persist(); renderAll();
   });
+  $('rec-reset').addEventListener('click', () => setRecipeForm(null));
+  $('rec-list').addEventListener('click', (e) => {
+    const edit = e.target.closest('[data-rec-edit]');
+    const del = e.target.closest('[data-rec-del]');
+    if (edit) setRecipeForm(state.recipes.find((x) => x.id === edit.dataset.recEdit));
+    if (del) {
+      state.recipes = state.recipes.filter((x) => x.id !== del.dataset.recDel);
+      persist(); renderAll();
+    }
+  });
+
+  $('dish-add-row').addEventListener('click', () => addDishRow());
+  ['dish-name', 'dish-category', 'dish-active', 'dish-packaging', 'dish-target', 'dish-vat', 'dish-delivery', 'dish-rounding', 'dish-price', 'dish-manual', 'dish-units', 'dish-period', 'dish-notes'].forEach((id) => $(id).addEventListener('input', renderDishMetrics));
+  $('dish-save').addEventListener('click', () => {
+    const d = readDishForm();
+    if (!d.name) return;
+    if (state.editDishId) state.dishes = state.dishes.map((x) => x.id === state.editDishId ? d : x);
+    else state.dishes.push(d);
+    setDishForm(null);
+    persist(); renderAll();
+  });
+  $('dish-reset').addEventListener('click', () => setDishForm(null));
+  $('dish-list').addEventListener('click', (e) => {
+    const edit = e.target.closest('[data-dish-edit]');
+    const del = e.target.closest('[data-dish-del]');
+    if (edit) setDishForm(state.dishes.find((x) => x.id === edit.dataset.dishEdit));
+    if (del) {
+      state.dishes = state.dishes.filter((x) => x.id !== del.dataset.dishDel);
+      persist(); renderAll();
+    }
+  });
+
+  $('snap-create').addEventListener('click', createSnapshot);
+  $('weekly-save').addEventListener('click', saveWeekly);
+}
+
+function renderAll() {
+  renderIngredients();
+  renderRecipes();
+  renderDishes();
+  renderHome();
+  renderAnalysis();
+  renderReports();
+  renderWeekly();
+  renderRecipeMetrics();
+  renderDishMetrics();
 }
 
 function init() {
-  loadData(); bindEvents(); renderIngredientLibrary(); renderSnapshotSelectors();
-  if (state.draft) { state.activeRecipeId = state.draft.id || null; setRecipeToForm(state.draft); }
-  else if (state.recipes[0]) { state.activeRecipeId = state.recipes[0].id; setRecipeToForm(state.recipes[0]); }
-  else resetRecipeForm();
-  dom.comparisonNotes.value = state.comparisonNotes || '';
-  renderRecipeList(); renderDashboard(); recalcAndRender(); renderWeeklyReview();
-  switchMode('home');
+  migrateLegacyData();
+  bindEvents();
+  setRecipeForm(null);
+  setDishForm(null);
+  renderAll();
+  modeSwitch('home');
 }
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', init, { once: true });
-} else {
-  init();
-}
+
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init, { once: true });
+else init();
