@@ -46,7 +46,8 @@
 
 
       <section id="weekly-review-section" class="card dashboard-block weekly-review-block">
-        <div class="panel-head"><h2>Weekly Review</h2><span id="weekly-review-status" class="count-pill">Not started</span></div>
+        <div class="panel-head"><h2>Weekly Review Mode</h2><span id="weekly-review-status" class="count-pill">Not started</span></div>
+        <p class="helper-text weekly-intro">Run a full operator check-in: validate data, compare movement, choose focus items, make decisions, and close the loop on last week.</p>
         <div class="weekly-step-indicator" id="weekly-step-indicator"></div>
         <div id="weekly-review-feedback" class="inline-errors" aria-live="polite"></div>
 
@@ -54,16 +55,16 @@
           <h3>Step 1 — Start Review</h3>
           <div class="field-grid two-col">
             <label class="field"><span>Review Name</span><input id="weekly-review-name" type="text" /></label>
-            <label class="field"><span>Start Notes (optional)</span><input id="weekly-review-notes" type="text" placeholder="Context for this week" /></label>
+            <label class="field"><span>Context (optional)</span><input id="weekly-review-notes" type="text" placeholder="Team notes, constraints, promo context..." /></label>
           </div>
           <div id="weekly-last-review" class="card-light"></div>
-          <div class="button-row"><button id="weekly-start-btn" class="btn btn-accent" type="button">Start Review</button></div>
+          <div class="button-row"><button id="weekly-start-btn" class="btn btn-accent" type="button">Start Weekly Ritual</button></div>
         </div>
 
         <div class="weekly-step" data-weekly-step="2">
           <h3>Step 2 — Data Check</h3>
-          <ul id="weekly-data-check-list"></ul>
-          <div class="button-row"><button id="weekly-continue-data-btn" class="btn" type="button">Continue</button></div>
+          <div id="weekly-data-check-list" class="weekly-data-check-list"></div>
+          <div class="button-row"><button id="weekly-continue-data-btn" class="btn" type="button">Continue to Snapshot</button></div>
         </div>
 
         <div class="weekly-step" data-weekly-step="3">
@@ -80,25 +81,25 @@
             <label class="field"><span>What declined?</span><input id="weekly-declined-note" type="text" /></label>
           </div>
           <label class="field"><span>Comparison Notes (optional)</span><input id="weekly-comparison-notes" type="text" /></label>
-          <div class="button-row"><button id="weekly-continue-comparison-btn" class="btn" type="button">Continue</button></div>
+          <div class="button-row"><button id="weekly-continue-comparison-btn" class="btn" type="button">Continue to Focus Items</button></div>
         </div>
 
         <div class="weekly-step" data-weekly-step="5">
           <h3>Step 5 — Focus Item Selector</h3>
           <div id="weekly-focus-list" class="weekly-focus-list"></div>
-          <div class="button-row"><button id="weekly-continue-focus-btn" class="btn" type="button">Continue</button></div>
+          <div class="button-row"><button id="weekly-continue-focus-btn" class="btn" type="button">Continue to Decisions</button></div>
         </div>
 
         <div class="weekly-step" data-weekly-step="6">
           <h3>Step 6 — Decision Panel</h3>
           <div id="weekly-decisions-list" class="weekly-decisions-list"></div>
-          <div class="button-row"><button id="weekly-continue-decisions-btn" class="btn" type="button">Continue</button></div>
+          <div class="button-row"><button id="weekly-continue-decisions-btn" class="btn" type="button">Continue to Summary</button></div>
         </div>
 
         <div class="weekly-step" data-weekly-step="7">
           <h3>Step 7 — Review Summary</h3>
-          <pre id="weekly-summary-output"></pre>
-          <div class="button-row"><button id="weekly-continue-summary-btn" class="btn" type="button">Continue</button></div>
+          <div id="weekly-summary-output" class="weekly-summary-output"></div>
+          <div class="button-row"><button id="weekly-continue-summary-btn" class="btn" type="button">Continue to Save</button></div>
         </div>
 
         <div class="weekly-step" data-weekly-step="8">
@@ -108,7 +109,7 @@
         </div>
 
         <div class="weekly-step" data-weekly-step="9">
-          <h3>Step 9 — Next Week Loop</h3>
+          <h3>Step 9 — Previous Review Follow-up</h3>
           <div id="weekly-evaluation-list" class="weekly-evaluation-list"></div>
           <div class="button-row"><button id="weekly-finish-btn" class="btn" type="button">Finish Review Cycle</button></div>
         </div>

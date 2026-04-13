@@ -1,7 +1,7 @@
 const STORAGE_VERSION = 4;
 const STORAGE_KEYS = {
   ingredients: 'mpe_v4_ingredients', recipes: 'mpe_v4_recipes', draft: 'mpe_v4_active_draft', seeded: 'mpe_v4_seeded',
-  snapshots: 'mpe_v4_snapshots', weeklyReviews: 'mpe_v4_weekly_reviews', prefs: 'mpe_v4_prefs', compareNotes: 'mpe_v4_compare_notes',
+  snapshots: 'mpe_v4_snapshots', weeklyReviews: 'mpe_v4_weekly_reviews', weeklyDraft: 'mpe_v4_weekly_draft', prefs: 'mpe_v4_prefs', compareNotes: 'mpe_v4_compare_notes',
   legacyIngredients: 'mpe_v3_ingredients', legacyRecipes: 'mpe_v3_recipes', legacyDraft: 'mpe_v3_active_draft', legacySeeded: 'mpe_v3_seeded',
 };
 const PACK_UNITS = ['g', 'kg', 'ml', 'l', 'unit'];
@@ -30,6 +30,10 @@ const state = {
   menuEngine: null, comparison: null,
   weeklyReviews: [], weeklyReview: { step: 1, started: false, name: '', notes: '', snapshotId: '', focusItemIds: [], decisions: [], comparisonNotes: '', improvedNote: '', declinedNote: '', previousEvaluation: [] },
 };
+
+const WEEKLY_STEPS = [
+  'Start', 'Data Check', 'Snapshot', 'Comparison', 'Focus', 'Decisions', 'Summary', 'Save', 'Follow-up',
+];
 
 const dom = {
   recipeList: $('recipe-list'), recipeCount: $('recipe-count'), recipeSearch: $('recipe-search'), recipeStatusFilter: $('recipe-status-filter'),
@@ -262,7 +266,10 @@ function comparePeriods(leftItems, rightItems) {
   };
 }
 
-function persistAll() { setStored(STORAGE_KEYS.ingredients, state.ingredients); setStored(STORAGE_KEYS.recipes, state.recipes); setStored(STORAGE_KEYS.snapshots, state.snapshots); setStored(STORAGE_KEYS.weeklyReviews, state.weeklyReviews); setStored(STORAGE_KEYS.prefs, state.prefs); }
+function persistAll() {
+  setStored(STORAGE_KEYS.ingredients, state.ingredients); setStored(STORAGE_KEYS.recipes, state.recipes); setStored(STORAGE_KEYS.snapshots, state.snapshots);
+  setStored(STORAGE_KEYS.weeklyReviews, state.weeklyReviews); setStored(STORAGE_KEYS.weeklyDraft, state.weeklyReview); setStored(STORAGE_KEYS.prefs, state.prefs);
+}
 function persistDraft() { const r = readRecipeFromForm(); r.updatedAt = nowIso(); state.draft = r; setStored(STORAGE_KEYS.draft, r); dom.draftState.textContent = `Draft autosaved ${new Date().toLocaleTimeString()}`; }
 
 function sampleIngredients() {
@@ -311,11 +318,13 @@ function seedSnapshots() {
 
 function loadData() {
   let ingredients = getStoredArray(STORAGE_KEYS.ingredients); let recipes = getStoredArray(STORAGE_KEYS.recipes); let snapshots = getStoredArray(STORAGE_KEYS.snapshots); let weeklyReviews = getStoredArray(STORAGE_KEYS.weeklyReviews);
+  const weeklyDraft = getStoredObject(STORAGE_KEYS.weeklyDraft, {});
   if (!ingredients.length && !recipes.length) { ingredients = getStoredArray(STORAGE_KEYS.legacyIngredients); recipes = getStoredArray(STORAGE_KEYS.legacyRecipes); }
   state.ingredients = ingredients.map(migrateIngredient);
   state.recipes = recipes.map(migrateRecipe);
   state.snapshots = Array.isArray(snapshots) ? snapshots : [];
   state.weeklyReviews = Array.isArray(weeklyReviews) ? weeklyReviews : [];
+  state.weeklyReview = { ...state.weeklyReview, ...(weeklyDraft || {}) };
   state.prefs = { ...state.prefs, ...getStoredObject(STORAGE_KEYS.prefs, {}) };
   state.comparisonNotes = localStorage.getItem(STORAGE_KEYS.compareNotes) || '';
 
@@ -606,6 +615,7 @@ function defaultReviewName() {
   const d = new Date();
   return `Weekly Review ${d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}`;
 }
+function persistWeeklyDraft() { setStored(STORAGE_KEYS.weeklyDraft, state.weeklyReview); }
 function ensureWeeklyDefaults() {
   state.weeklyReview = { step: 1, started: false, name: defaultReviewName(), notes: '', snapshotId: '', focusItemIds: [], decisions: [], comparisonNotes: '', improvedNote: '', declinedNote: '', previousEvaluation: [], ...state.weeklyReview };
 }
@@ -633,15 +643,17 @@ function suggestFocusItems(items) {
   return [...new Map(picked.map((i) => [i.id, i])).values()].slice(0, 5);
 }
 function gotoWeeklyStep(step) {
-  state.weeklyReview.step = clamp(step, 1, 9);
+  const maxStep = state.weeklyReview.started ? 9 : 1;
+  state.weeklyReview.step = clamp(step, 1, maxStep);
+  persistWeeklyDraft();
   renderWeeklyReview();
 }
 function weeklySummaryText() {
   const currentItems = weeklyCurrentItems();
   const selected = currentItems.filter((i) => state.weeklyReview.focusItemIds.includes(i.id));
-  const decisionLines = selected.map((i) => {
+  const decisionLines = selected.map((i, idx) => {
     const d = state.weeklyReview.decisions.find((x) => x.itemId === i.id) || {};
-    return `- ${i.name} (${i.classification}): ${d.action || 'No action selected'}${d.notes ? ` — ${d.notes}` : ''}`;
+    return `${idx + 1}. ${i.name} (${i.classification}) — ${d.action || 'Action not set'}${d.notes ? ` · ${d.notes}` : ''}`;
   });
   return [
     `${state.weeklyReview.name}`,
@@ -654,7 +666,15 @@ function weeklySummaryText() {
     decisionLines.length ? decisionLines.join('\n') : '- No focus items selected',
   ].join('\n');
 }
+function renderWeeklySummaryPanel() {
+  dom.weekly.summaryOutput.innerHTML = `
+    <h4>Review summary</h4>
+    <p class="helper-text">Ready to save when this looks right.</p>
+    <ul>${weeklySummaryText().split('\n').filter(Boolean).map((line) => `<li>${line}</li>`).join('')}</ul>
+  `;
+}
 function saveWeeklyReview() {
+  if (!state.weeklyReview.decisions.length) { setInlineMessage(dom.weekly.feedback, 'Add at least one item decision before saving.'); return false; }
   const review = {
     id: uid('wrev'),
     name: state.weeklyReview.name,
@@ -673,7 +693,9 @@ function saveWeeklyReview() {
   };
   state.weeklyReviews.unshift(review);
   setStored(STORAGE_KEYS.weeklyReviews, state.weeklyReviews);
+  persistWeeklyDraft();
   setInlineMessage(dom.weekly.feedback, `Weekly review "${review.name}" saved.`, 'success');
+  return true;
 }
 function renderWeeklyReview() {
   ensureWeeklyDefaults();
@@ -684,19 +706,27 @@ function renderWeeklyReview() {
   dom.weekly.improvedNote.value = wr.improvedNote || '';
   dom.weekly.declinedNote.value = wr.declinedNote || '';
   dom.weekly.comparisonNotes.value = wr.comparisonNotes || '';
-  const chips = Array.from({ length: 9 }).map((_, i) => `<span class="weekly-step-chip ${wr.step === i + 1 ? 'active' : ''}">Step ${i + 1}</span>`);
+  const chips = WEEKLY_STEPS.map((label, i) => {
+    const stepNum = i + 1;
+    const classes = ['weekly-step-chip', wr.step === stepNum ? 'active' : '', wr.step > stepNum ? 'done' : ''].filter(Boolean).join(' ');
+    return `<button type="button" data-weekly-nav="${stepNum}" class="${classes}" ${(!wr.started && stepNum > 1) ? 'disabled' : ''}><strong>${stepNum}. ${label}</strong></button>`;
+  });
   dom.weekly.stepIndicator.innerHTML = chips.join('');
   dom.weekly.steps.forEach((el) => el.classList.toggle('active', Number(el.dataset.weeklyStep) === wr.step));
 
   const last = state.weeklyReviews[0];
-  dom.weekly.lastReview.innerHTML = last ? `<strong>Last Review:</strong> ${last.name} (${shortDateTime(last.createdAt)})<br/><span class="helper-text">${(last.decisions || []).map((d) => `${d.itemName}: ${d.action}`).join(' · ') || 'No decisions recorded.'}</span>` : '<span class="helper-text">No previous weekly review yet.</span>';
+  dom.weekly.lastReview.innerHTML = last ? `<strong>Last Review:</strong> ${last.name} (${shortDateTime(last.createdAt)})<br/><span class="helper-text">${(last.decisions || []).slice(0, 4).map((d) => `${d.itemName}: ${d.action}`).join(' · ') || 'No decisions recorded.'}</span>` : '<span class="helper-text">No previous weekly review yet.</span>';
 
   const check = validateDataCheck();
-  const checkLines = [];
-  if (check.missingUnits.length) checkLines.push(`<li>Missing units sold for: ${check.missingUnits.join(', ')}</li>`);
-  if (check.missingPrice.length) checkLines.push(`<li>Missing selling price for: ${check.missingPrice.join(', ')}</li>`);
-  if (!checkLines.length) checkLines.push('<li>All items have units sold and selling price.</li>');
-  dom.weekly.dataCheckList.innerHTML = checkLines.join('');
+  const checkCards = [];
+  checkCards.push(check.missingPrice.length
+    ? `<div class="weekly-check-item warn"><h4>Missing selling prices (${check.missingPrice.length})</h4><ul class="weekly-check-list">${check.missingPrice.map((n) => `<li>${n}</li>`).join('')}</ul></div>`
+    : '<div class="weekly-check-item good"><h4>Selling prices look complete</h4><p class="helper-text">Every active item has a selling price.</p></div>');
+  checkCards.push(check.missingUnits.length
+    ? `<div class="weekly-check-item warn"><h4>Missing units sold (${check.missingUnits.length})</h4><ul class="weekly-check-list">${check.missingUnits.map((n) => `<li>${n}</li>`).join('')}</ul></div>`
+    : '<div class="weekly-check-item good"><h4>Units sold look complete</h4><p class="helper-text">Every active item has unit sales data.</p></div>');
+  checkCards.push('<div class="weekly-check-item"><h4>Can I continue?</h4><p class="helper-text">Yes. Continue if data gaps are expected this week; just note them in your summary.</p></div>');
+  dom.weekly.dataCheckList.innerHTML = checkCards.join('');
 
   const currentItems = weeklyCurrentItems();
   const priorSnapshot = state.snapshots.slice().sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))[0];
@@ -704,10 +734,21 @@ function renderWeeklyReview() {
   dom.weekly.comparisonSummary.innerHTML = comp ? `Comparing latest snapshot <strong>${priorSnapshot.name}</strong> to current live data. Improved: ${comp.summary.improved}, Worsened: ${comp.summary.worsened}, Revenue Δ ${fmtCurrency(comp.summary.revenueDelta)}.` : 'No snapshot available yet. Create one in Step 3.';
 
   if (!wr.focusItemIds.length) wr.focusItemIds = suggestFocusItems(currentItems).map((i) => i.id);
-  dom.weekly.focusList.innerHTML = currentItems.map((i) => {
+  const suggestedIds = new Set(suggestFocusItems(currentItems).map((i) => i.id));
+  const byClass = ['Star', 'Plowhorse', 'Puzzle', 'Dog'].map((cls) => ({ cls, items: currentItems.filter((i) => i.classification === cls) })).filter((g) => g.items.length);
+  dom.weekly.focusList.innerHTML = byClass.map((group) => `
+    <div class="weekly-focus-group">
+      <h4 class="weekly-focus-group-title">${group.cls}s</h4>
+      ${group.items.map((i) => {
     const checked = wr.focusItemIds.includes(i.id) ? 'checked' : '';
-    return `<label class="weekly-focus-item"><input type="checkbox" data-focus-id="${i.id}" ${checked}/> <strong>${i.name}</strong> <span class="badge badge-${i.classification.toLowerCase()}">${i.classification}</span><div class="weekly-metrics"><span>Profit ${fmtCurrency(i.totalGrossProfit)}</span><span>Food Cost ${fmtPercent(i.foodCostPercent)}</span><span>Units ${fmtInt(i.unitsSold)}</span></div></label>`;
-  }).join('');
+    const selected = wr.focusItemIds.includes(i.id) ? 'selected' : '';
+    const suggested = suggestedIds.has(i.id) ? '<span class="count-pill">Suggested</span>' : '';
+    return `<label class="weekly-focus-item ${selected}">
+      <div class="weekly-focus-head"><span><input type="checkbox" data-focus-id="${i.id}" ${checked}/> <strong>${i.name}</strong></span><span>${suggested} <span class="badge badge-${i.classification.toLowerCase()}">${i.classification}</span></span></div>
+      <div class="weekly-metrics"><span>Total GP ${fmtCurrency(i.totalGrossProfit)}</span><span>GP/Portion ${fmtCurrency(i.grossProfitPerPortion)}</span><span>Food Cost ${fmtPercent(i.foodCostPercent)}</span><span>Units ${fmtInt(i.unitsSold)}</span></div>
+    </label>`;
+  }).join('')}
+    </div>`).join('');
 
   const selected = currentItems.filter((i) => wr.focusItemIds.includes(i.id));
   wr.decisions = wr.decisions.filter((d) => wr.focusItemIds.includes(d.itemId));
@@ -717,16 +758,17 @@ function renderWeeklyReview() {
   const options = ['Promote', 'Increase Price', 'Reduce Cost', 'Improve Visibility', 'Remove / Redesign'];
   dom.weekly.decisionsList.innerHTML = selected.length ? selected.map((i) => {
     const d = wr.decisions.find((x) => x.itemId === i.id);
-    return `<div class="weekly-decision-item" data-decision-id="${i.id}"><strong>${i.name}</strong> <span class="badge badge-${i.classification.toLowerCase()}">${i.classification}</span><div class="weekly-metrics"><span>Profit ${fmtCurrency(i.totalGrossProfit)}</span><span>Food Cost ${fmtPercent(i.foodCostPercent)}</span><span>Units ${fmtInt(i.unitsSold)}</span></div><label class="field"><span>Action</span><select data-action-id="${i.id}">${options.map((o) => `<option value="${o}" ${d.action === o ? 'selected' : ''}>${o}</option>`).join('')}</select></label><label class="field"><span>Notes (optional)</span><input data-note-id="${i.id}" type="text" value="${d.notes || ''}"/></label></div>`;
+    return `<div class="weekly-decision-item" data-decision-id="${i.id}"><div class="weekly-focus-head"><h4>${i.name}</h4><span class="badge badge-${i.classification.toLowerCase()}">${i.classification}</span></div><div class="weekly-metrics"><span>Total GP ${fmtCurrency(i.totalGrossProfit)}</span><span>GP/Portion ${fmtCurrency(i.grossProfitPerPortion)}</span><span>Food Cost ${fmtPercent(i.foodCostPercent)}</span><span>Units ${fmtInt(i.unitsSold)}</span></div><label class="field"><span>Action</span><select data-action-id="${i.id}">${options.map((o) => `<option value="${o}" ${d.action === o ? 'selected' : ''}>${o}</option>`).join('')}</select></label><label class="field"><span>Notes (optional)</span><input data-note-id="${i.id}" type="text" value="${d.notes || ''}" placeholder="Short reason or execution note"/></label></div>`;
   }).join('') : '<div class="helper-text">Select at least 1 focus item in Step 5.</div>';
 
-  dom.weekly.summaryOutput.textContent = weeklySummaryText();
+  renderWeeklySummaryPanel();
 
   const prev = state.weeklyReviews[0];
   dom.weekly.evaluationList.innerHTML = prev && prev.decisions?.length ? prev.decisions.map((d) => {
     const existing = wr.previousEvaluation.find((x) => x.itemId === d.itemId)?.status || 'Needs adjustment';
-    return `<div class="weekly-eval-item" data-eval-id="${d.itemId}"><strong>${d.itemName}</strong> — Last action: ${d.action}<label class="field"><span>Outcome</span><select data-eval-select="${d.itemId}"><option ${existing === 'Worked' ? 'selected' : ''}>Worked</option><option ${existing === 'Didn’t work' ? 'selected' : ''}>Didn’t work</option><option ${existing === 'Needs adjustment' ? 'selected' : ''}>Needs adjustment</option></select></label></div>`;
+    return `<div class="weekly-eval-item" data-eval-id="${d.itemId}"><div class="weekly-eval-header"><strong>${d.itemName}</strong><span class="helper-text">Last action: ${d.action}</span></div><label class="field"><span>Outcome this week</span><select data-eval-select="${d.itemId}"><option ${existing === 'Worked' ? 'selected' : ''}>Worked</option><option ${existing === 'Didn’t work' ? 'selected' : ''}>Didn’t work</option><option ${existing === 'Needs adjustment' ? 'selected' : ''}>Needs adjustment</option></select></label></div>`;
   }).join('') : '<div class="helper-text">No prior decisions to evaluate yet.</div>';
+  persistWeeklyDraft();
 }
 
 function bindEvents() {
@@ -764,11 +806,18 @@ function bindEvents() {
   dom.actions.copySummary.addEventListener('click', async () => { try { await navigator.clipboard.writeText(reviewSummaryText()); setInlineMessage(dom.snapshotFeedback, 'Summary copied to clipboard.', 'success'); } catch { setInlineMessage(dom.snapshotFeedback, 'Clipboard not available in this browser context.'); } });
 
   dom.weekly.navBtn.addEventListener('click', () => dom.weekly.section.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  dom.weekly.stepIndicator.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-weekly-nav]'); if (!btn) return;
+    const step = toNumber(btn.dataset.weeklyNav, 1);
+    if (!state.weeklyReview.started && step > 1) return;
+    gotoWeeklyStep(step);
+  });
   dom.weekly.startBtn.addEventListener('click', () => {
     ensureWeeklyDefaults();
     state.weeklyReview.started = true;
     state.weeklyReview.name = cleanText(dom.weekly.name.value) || defaultReviewName();
     state.weeklyReview.notes = cleanText(dom.weekly.notes.value);
+    persistWeeklyDraft();
     gotoWeeklyStep(2);
   });
   dom.weekly.continueDataBtn.addEventListener('click', () => gotoWeeklyStep(3));
@@ -792,6 +841,7 @@ function bindEvents() {
     state.weeklyReview.improvedNote = cleanText(dom.weekly.improvedNote.value);
     state.weeklyReview.declinedNote = cleanText(dom.weekly.declinedNote.value);
     state.weeklyReview.comparisonNotes = cleanText(dom.weekly.comparisonNotes.value);
+    persistWeeklyDraft();
     gotoWeeklyStep(5);
   });
   dom.weekly.focusList.addEventListener('change', (e) => {
@@ -801,6 +851,7 @@ function bindEvents() {
     const set = new Set(state.weeklyReview.focusItemIds);
     if (el.checked) set.add(id); else set.delete(id);
     state.weeklyReview.focusItemIds = [...set];
+    persistWeeklyDraft();
     renderWeeklyReview();
   });
   dom.weekly.continueFocusBtn.addEventListener('click', () => {
@@ -816,19 +867,22 @@ function bindEvents() {
     if (noteId) {
       const d = state.weeklyReview.decisions.find((x) => x.itemId === noteId); if (d) d.notes = e.target.value;
     }
-    dom.weekly.summaryOutput.textContent = weeklySummaryText();
+    persistWeeklyDraft();
+    renderWeeklySummaryPanel();
   });
   dom.weekly.continueDecisionsBtn.addEventListener('click', () => gotoWeeklyStep(7));
   dom.weekly.continueSummaryBtn.addEventListener('click', () => gotoWeeklyStep(8));
-  dom.weekly.saveBtn.addEventListener('click', () => { saveWeeklyReview(); gotoWeeklyStep(9); });
+  dom.weekly.saveBtn.addEventListener('click', () => { if (saveWeeklyReview()) gotoWeeklyStep(9); });
   dom.weekly.evaluationList.addEventListener('change', (e) => {
     const id = e.target.dataset.evalSelect; if (!id) return;
     const existing = state.weeklyReview.previousEvaluation.find((x) => x.itemId === id);
     if (existing) existing.status = e.target.value;
     else state.weeklyReview.previousEvaluation.push({ itemId: id, status: e.target.value });
+    persistWeeklyDraft();
   });
   dom.weekly.finishBtn.addEventListener('click', () => {
     state.weeklyReview = { step: 1, started: false, name: defaultReviewName(), notes: '', snapshotId: '', focusItemIds: [], decisions: [], comparisonNotes: '', improvedNote: '', declinedNote: '', previousEvaluation: [] };
+    localStorage.removeItem(STORAGE_KEYS.weeklyDraft);
     renderWeeklyReview();
     setInlineMessage(dom.weekly.feedback, 'Cycle finished. Start next week review when ready.', 'success');
   });
