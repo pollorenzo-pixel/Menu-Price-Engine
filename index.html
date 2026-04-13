@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Menu Price Engine — Stage 2</title>
+    <title>Menu Price Engine — Stage 3</title>
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
@@ -11,67 +11,53 @@
       <header class="app-header card">
         <div>
           <h1>Menu Price Engine</h1>
-          <p>Kiju internal costing dashboard · Stage 2</p>
+          <p>Kiju internal costing + menu engineering dashboard · Stage 3</p>
         </div>
-        <button id="open-library-btn" class="btn btn-accent" type="button">Open Ingredient Library</button>
+        <div class="header-actions">
+          <button id="open-library-btn" class="btn btn-accent" type="button">Open Ingredient Library</button>
+          <button id="new-recipe-btn" class="btn btn-secondary" type="button">New Recipe</button>
+        </div>
       </header>
 
-      <main class="dashboard-grid">
-        <aside class="panel card" aria-label="Saved recipes panel">
+      <main class="workspace-grid">
+        <aside class="panel card" aria-label="Saved menu items">
           <div class="panel-head">
-            <h2>Saved Recipes</h2>
+            <h2>Saved Menu Items</h2>
             <span id="recipe-count" class="count-pill">0</span>
           </div>
           <label class="field">
-            <span>Search Recipes</span>
-            <input id="recipe-search" type="search" placeholder="Search by recipe name" />
+            <span>Search recipes</span>
+            <input id="recipe-search" type="search" placeholder="Search by name" />
           </label>
-          <button id="new-recipe-btn" class="btn btn-secondary" type="button">New Recipe</button>
-          <p class="helper-text">Tip: click any saved recipe card to load it into the editor.</p>
+          <label class="field">
+            <span>Status filter</span>
+            <select id="recipe-status-filter">
+              <option value="all">All</option>
+              <option value="active">Active only</option>
+              <option value="inactive">Inactive only</option>
+            </select>
+          </label>
+          <p class="helper-text">Select a recipe to edit costing and performance data.</p>
           <ul id="recipe-list" class="recipe-list"></ul>
         </aside>
 
-        <section class="panel card" aria-label="Recipe editor panel">
+        <section class="panel card" aria-label="Recipe editor">
           <div class="panel-head">
             <h2>Recipe Editor</h2>
             <span id="draft-state" class="meta-text">Draft autosave enabled</span>
           </div>
-
           <div id="editor-errors" class="inline-errors" aria-live="polite"></div>
 
+          <div class="section-head"><h3>Costing Inputs</h3></div>
           <div class="field-grid two-col">
-            <label class="field">
-              <span>Recipe Name *</span>
-              <input id="recipe-name" type="text" placeholder="e.g. Chicken Banh Mi" />
-            </label>
-            <label class="field">
-              <span>Category</span>
-              <input id="recipe-category" type="text" placeholder="e.g. Sandwich" />
-            </label>
-            <label class="field">
-              <span>Portions Yielded *</span>
-              <input id="portions-yielded" type="number" min="0.01" step="0.01" value="10" />
-            </label>
-            <label class="field">
-              <span>Target Food Cost % *</span>
-              <input id="target-food-cost" type="number" min="0.01" max="99.99" step="0.01" value="30" />
-            </label>
-            <label class="field">
-              <span>Packaging Cost / Portion (£)</span>
-              <input id="packaging-cost" type="number" min="0" step="0.01" value="0" />
-            </label>
-            <label class="field">
-              <span>Labour Cost / Portion (£)</span>
-              <input id="labour-cost" type="number" min="0" step="0.01" value="0" />
-            </label>
-            <label class="field">
-              <span>VAT Rate %</span>
-              <input id="vat-rate" type="number" min="0" step="0.01" value="20" />
-            </label>
-            <label class="field">
-              <span>Delivery Commission %</span>
-              <input id="delivery-commission" type="number" min="0" step="0.01" value="30" />
-            </label>
+            <label class="field"><span>Recipe Name *</span><input id="recipe-name" type="text" /></label>
+            <label class="field"><span>Category</span><input id="recipe-category" type="text" /></label>
+            <label class="field"><span>Portions Yielded *</span><input id="portions-yielded" type="number" min="0.01" step="0.01" value="10" /></label>
+            <label class="field"><span>Target Food Cost % *</span><input id="target-food-cost" type="number" min="0.01" max="99.99" step="0.01" value="30" /></label>
+            <label class="field"><span>Packaging Cost / Portion (£)</span><input id="packaging-cost" type="number" min="0" step="0.01" value="0" /></label>
+            <label class="field"><span>Labour Cost / Portion (£)</span><input id="labour-cost" type="number" min="0" step="0.01" value="0" /></label>
+            <label class="field"><span>VAT Rate %</span><input id="vat-rate" type="number" min="0" step="0.01" value="20" /></label>
+            <label class="field"><span>Delivery Commission %</span><input id="delivery-commission" type="number" min="0" step="0.01" value="30" /></label>
             <label class="field">
               <span>Rounding Rule</span>
               <select id="rounding-rule">
@@ -81,10 +67,26 @@
                 <option value="1">Nearest 1.00</option>
               </select>
             </label>
+            <label class="field"><span>Manual Menu Price (£)</span><input id="manual-price" type="number" min="0" step="0.01" placeholder="Optional" /></label>
+          </div>
+
+          <div class="section-head with-action">
+            <h3>Performance Inputs (Stage 3)</h3>
+          </div>
+          <div class="field-grid two-col">
+            <label class="field"><span>Current Selling Price (£) *</span><input id="selling-price" type="number" min="0" step="0.01" /></label>
+            <label class="field"><span>Units Sold (period) *</span><input id="units-sold" type="number" min="0" step="1" value="0" /></label>
+            <label class="field"><span>Reporting Period</span><input id="reporting-period" type="text" placeholder="e.g. Last 30 Days" /></label>
+            <label class="field"><span>Internal Score (0-10)</span><input id="internal-score" type="number" min="0" max="10" step="0.1" /></label>
             <label class="field">
-              <span>Manual Menu Price (£)</span>
-              <input id="manual-price" type="number" min="0" step="0.01" placeholder="Optional" />
+              <span>Menu Status</span>
+              <select id="is-active">
+                <option value="true">Active</option>
+                <option value="false">Inactive</option>
+              </select>
             </label>
+            <label class="field"><span>Revenue Override (£)</span><input id="revenue-override" type="number" min="0" step="0.01" placeholder="Optional" /></label>
+            <label class="field field-full"><span>Item Notes</span><input id="item-notes" type="text" placeholder="Optional internal notes" /></label>
           </div>
 
           <div class="section-head with-action">
@@ -119,31 +121,105 @@
           </div>
         </section>
 
-        <aside class="panel card" aria-label="Results panel">
-          <div class="panel-head">
-            <h2>Pricing Results</h2>
-          </div>
-          <div class="results-grid" id="results-grid">
+        <aside class="panel card" aria-label="Results and insights">
+          <div class="panel-head"><h2>Item Results</h2></div>
+          <div class="results-grid">
             <div class="result-item"><span>Total ingredient cost</span><strong id="res-total-ingredient">£0.00</strong></div>
             <div class="result-item"><span>Ingredient cost / portion</span><strong id="res-ingredient-portion">£0.00</strong></div>
-            <div class="result-item"><span>Total cost / portion (excl labour)</span><strong id="res-total-portion">£0.00</strong></div>
-            <div class="result-item"><span>Total cost / portion (incl labour)</span><strong id="res-total-labour">£0.00</strong></div>
-            <div class="result-item"><span>Suggested net selling price</span><strong id="res-suggested-net">£0.00</strong></div>
-            <div class="result-item"><span>Rounded selling price</span><strong id="res-rounded">£0.00</strong></div>
+            <div class="result-item"><span>Portion cost excl labour</span><strong id="res-total-portion">£0.00</strong></div>
+            <div class="result-item"><span>Portion cost incl labour</span><strong id="res-total-labour">£0.00</strong></div>
+            <div class="result-item"><span>Suggested net price</span><strong id="res-suggested-net">£0.00</strong></div>
+            <div class="result-item"><span>Rounded suggestion</span><strong id="res-rounded">£0.00</strong></div>
             <div class="result-item"><span>VAT-inclusive price</span><strong id="res-vat">£0.00</strong></div>
             <div class="result-item"><span>Delivery-adjusted recommendation</span><strong id="res-delivery">£0.00</strong></div>
             <div class="result-item"><span>Gross profit / portion</span><strong id="res-gross">£0.00</strong></div>
-            <div class="result-item"><span>Actual food cost % (rounded)</span><strong id="res-food-rounded">0.00%</strong></div>
-            <div class="result-item"><span>Actual food cost % (manual)</span><strong id="res-food-manual">—</strong></div>
+            <div class="result-item"><span>Food cost %</span><strong id="res-food-rounded">0.00%</strong></div>
+            <div class="result-item"><span>Total revenue (period)</span><strong id="res-total-revenue">£0.00</strong></div>
+            <div class="result-item"><span>Total gross profit (period)</span><strong id="res-total-gross-profit">£0.00</strong></div>
+            <div class="result-item"><span>Classification</span><strong id="res-classification">—</strong></div>
+            <div class="result-item"><span>Recommended action</span><strong id="res-action">—</strong></div>
           </div>
-
           <div class="insight-card">
             <h3>Pricing Insight</h3>
             <ul id="insight-list"></ul>
           </div>
+          <div class="insight-card">
+            <h3>Stage 3 Item Flags</h3>
+            <ul id="item-flag-list"></ul>
+          </div>
           <div id="calc-warnings" class="inline-errors" aria-live="polite"></div>
         </aside>
       </main>
+
+      <section class="card dashboard-block" aria-label="Menu engineering dashboard">
+        <div class="panel-head">
+          <h2>Stage 3 Menu Dashboard</h2>
+          <span id="period-label" class="meta-text">Reporting period: mixed</span>
+        </div>
+        <div id="dashboard-cards" class="dashboard-cards"></div>
+        <div class="dashboard-row">
+          <div class="card-light">
+            <h3>Operational Flags Summary</h3>
+            <ul id="bulk-flag-summary"></ul>
+          </div>
+          <div class="card-light">
+            <h3>Top 3 by Units Sold</h3>
+            <ol id="top-units-list"></ol>
+          </div>
+          <div class="card-light">
+            <h3>Top 3 by Total Gross Profit</h3>
+            <ol id="top-profit-list"></ol>
+          </div>
+          <div class="card-light">
+            <h3>Priority Insights</h3>
+            <ul id="menu-insight-list"></ul>
+          </div>
+        </div>
+      </section>
+
+      <section class="card dashboard-block" aria-label="Menu engineering matrix">
+        <div class="panel-head"><h2>Popularity vs Profitability Matrix</h2></div>
+        <div id="matrix-fallback" class="helper-text"></div>
+        <div id="matrix-chart" class="matrix-chart" role="img" aria-label="Menu engineering matrix"></div>
+      </section>
+
+      <section class="card dashboard-block" aria-label="Menu analysis table">
+        <div class="panel-head"><h2>Menu Engineering Table</h2></div>
+        <div class="analysis-controls">
+          <label class="field"><span>Search items</span><input id="analysis-search" type="search" placeholder="Search by item name" /></label>
+          <label class="field">
+            <span>Classification filter</span>
+            <select id="analysis-class-filter">
+              <option value="all">All</option>
+              <option value="Star">Star</option>
+              <option value="Plowhorse">Plowhorse</option>
+              <option value="Puzzle">Puzzle</option>
+              <option value="Dog">Dog</option>
+              <option value="Unclassified">Unclassified</option>
+            </select>
+          </label>
+        </div>
+        <div class="table-wrap">
+          <table id="analysis-table">
+            <thead>
+              <tr>
+                <th data-sort="name">Item</th>
+                <th data-sort="classification">Category</th>
+                <th data-sort="sellingPrice">Selling Price</th>
+                <th data-sort="portionCost">Portion Cost</th>
+                <th data-sort="grossProfitPerPortion">Gross Profit/Portion</th>
+                <th data-sort="foodCostPercent">Food Cost %</th>
+                <th data-sort="unitsSold">Units Sold</th>
+                <th data-sort="revenue">Revenue</th>
+                <th data-sort="totalGrossProfit">Total Gross Profit</th>
+                <th>Action</th>
+                <th>Flags</th>
+              </tr>
+            </thead>
+            <tbody id="analysis-body"></tbody>
+          </table>
+        </div>
+      </section>
     </div>
 
     <div id="library-modal" class="modal" aria-hidden="true">
@@ -153,22 +229,12 @@
           <h2 id="library-title">Ingredient Library</h2>
           <button id="close-library-btn" class="btn" type="button">Close</button>
         </div>
-
         <div id="library-errors" class="inline-errors" aria-live="polite"></div>
 
         <div class="field-grid three-col">
-          <label class="field">
-            <span>Name *</span>
-            <input id="lib-name" type="text" placeholder="Ingredient name" />
-          </label>
-          <label class="field">
-            <span>Purchase Price (£) *</span>
-            <input id="lib-price" type="number" min="0" step="0.01" />
-          </label>
-          <label class="field">
-            <span>Pack Size *</span>
-            <input id="lib-pack-size" type="number" min="0.0001" step="0.0001" />
-          </label>
+          <label class="field"><span>Name *</span><input id="lib-name" type="text" /></label>
+          <label class="field"><span>Purchase Price (£) *</span><input id="lib-price" type="number" min="0" step="0.01" /></label>
+          <label class="field"><span>Pack Size *</span><input id="lib-pack-size" type="number" min="0.0001" step="0.0001" /></label>
           <label class="field">
             <span>Pack Unit *</span>
             <select id="lib-pack-unit">
@@ -180,14 +246,8 @@
               <option value="unit">unit</option>
             </select>
           </label>
-          <label class="field">
-            <span>Supplier</span>
-            <input id="lib-supplier" type="text" placeholder="Optional" />
-          </label>
-          <label class="field">
-            <span>Notes</span>
-            <input id="lib-notes" type="text" placeholder="Optional" />
-          </label>
+          <label class="field"><span>Supplier</span><input id="lib-supplier" type="text" /></label>
+          <label class="field"><span>Notes</span><input id="lib-notes" type="text" /></label>
         </div>
 
         <div class="button-row">
@@ -197,10 +257,7 @@
           <span id="ingredient-count" class="count-pill">0</span>
         </div>
 
-        <label class="field">
-          <span>Search Ingredients</span>
-          <input id="ingredient-search" type="search" placeholder="Search ingredient" />
-        </label>
+        <label class="field"><span>Search Ingredients</span><input id="ingredient-search" type="search" /></label>
 
         <div class="table-wrap">
           <table>
@@ -225,7 +282,7 @@
       <tr>
         <td><select class="row-lib-select"></select></td>
         <td><input class="row-name" type="text" /></td>
-        <td><input class="row-price" type="number" min="0" step="0.01" /></td>
+        <td><input class="row-price" type="number" min="0" step="0.0001" /></td>
         <td><input class="row-pack-size" type="number" min="0.0001" step="0.0001" /></td>
         <td>
           <select class="row-pack-unit">
@@ -246,8 +303,8 @@
             <option value="unit">unit</option>
           </select>
         </td>
-        <td><output class="row-cost">£0.00</output></td>
-        <td><button type="button" class="btn btn-icon row-remove">Remove</button></td>
+        <td><span class="row-cost">£0.00</span></td>
+        <td><button type="button" class="btn btn-danger btn-icon row-remove">✕</button></td>
       </tr>
     </template>
 
