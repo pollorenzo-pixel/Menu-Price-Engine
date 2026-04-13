@@ -9,76 +9,110 @@ The app uses a strict three-level structure:
 1. **Ingredients** = what you buy
    - Raw purchased supplier items only.
    - Contains purchase price, pack size/unit, supplier, and notes.
-   - Ingredient Library view is grouped by supplier with clear accordion sections and a dedicated **Unassigned supplier** group for items missing supplier attribution.
-   - Supplier headers are visually distinct from ingredient rows for faster scanning.
-   - Search + supplier filtering can be combined, with quick **Clear filters** behavior.
 
 2. **Recipes** = what you prep
    - Prepared components (sauces, dressings, cooked proteins, toppings, etc.).
-   - Production costing only.
-   - Recipe metrics are limited to:
-     - total batch cost
-     - cost per yield unit
-   - Recipe forms intentionally do **not** contain selling/commercial fields.
+   - Production costing only (`total batch cost`, `cost per yield unit`).
 
 3. **Dishes** = what you sell
    - Customer-facing menu items.
-   - Can use:
-     - raw ingredients directly,
-     - recipes/components,
-     - or both in the same dish.
-   - Commercial fields live only here:
-     - target food cost %
-     - packaging per portion
-     - VAT
-     - delivery commission
-     - rounding rule
-     - selling price / manual override
-     - units sold / reporting period
+   - Can use raw ingredients, prep recipes, or both in one dish.
+   - Commercial fields live only here.
 
-## Navigation and workflow clarity
+## New: Pricing Intelligence
 
-Top navigation is organized by workflow order:
+### Why this exists
+Traditional formula pricing (`portion cost / target food cost %`) is still useful, but not enough by itself for real menu decisions.
 
-1) Ingredients → 2) Recipes → 3) Dishes → 4) Analysis → 5) Reports → 6) Weekly Review
+Some dishes should be priced above formula because of labour burden, market expectation, perceived value, and strategic role (for example, wings, add-ons, drinks, signature items).
 
-- Home highlights dish-level KPIs and actions.
-- Quick-jump buttons are included to reduce context switching confusion.
+Pricing Intelligence keeps formula pricing, then layers practical commercial logic on top.
 
-## Dishes-only commercial surfaces
+### Dish-level Pricing Intelligence inputs
+Each Dish now includes:
 
-The following sections all run on **Dishes**:
+- `pricingStrategy`
+  - **Standard**: mostly cost-led, balanced
+  - **Market-Based**: stronger weight on market range
+  - **Margin Driver**: protects contribution and margin
+  - **Traffic Builder**: tighter strategic pricing with margin warnings
+  - **Premium Signature**: premium-friendly recommendation
+- `labourIntensity` (Low / Medium / High)
+- `perceivedValue` (Low / Medium / High)
+- `menuRole`
+  - Core Main, Side / Add-On, Signature Item, Combo Driver, Traffic Builder, High Margin Support
+- Optional market range:
+  - `marketLowPrice`
+  - `marketHighPrice`
+- Optional manual floor:
+  - `minimumAcceptablePrice`
 
-- Home
-- Menu Analysis
-- Reports & Snapshots
-- Weekly Review
+### Pricing Intelligence outputs
+For each dish, the app displays:
 
-## Migration safety from old mixed objects
+1. Portion cost
+2. Formula price
+3. Market-guided range
+4. Strategic recommended price
+5. Final recommended price (after floor checks + rounding)
+6. Food cost % at final recommendation
+7. Confidence score
+8. Pricing rationale
+9. Pricing flags
 
-A safe best-effort migration runs on load:
+### How final recommended price is derived
 
-- If v5 keys are missing, legacy v4 keys are read.
-- Legacy mixed recipe objects are inspected.
-- Legacy objects with commercial menu fields are migrated to **Dish** records.
-- Legacy production-only objects remain **Recipe** records.
-- Ingredient rows are preserved as component/input rows where possible.
+1. **Formula price**
+   - `portion cost / (target food cost % / 100)`
 
-Additional safety pass:
+2. **Strategic lift layer**
+   - Labour intensity, perceived value, and menu role add transparent uplift.
 
-- If existing v5 recipe data still contains legacy commercial fields (mixed objects), those entries are split safely:
-  - converted to Dishes,
-  - removed from Recipes,
-  - normalized and persisted.
+3. **Strategy weighting**
+   - Formula, market midpoint, and strategic uplift are blended differently by strategy type.
 
-## Mobile layout
+4. **Market-guided behavior**
+   - If market range is provided, midpoint influences recommendation.
+   - Formula far below market triggers a rationale + flags.
 
-The mobile layout is optimized for clarity:
+5. **Price floor logic**
+   - Final recommendation is constrained by applicable floors:
+     - formula protection (for selected strategies)
+     - market low (for market-aware strategies)
+     - operator minimum acceptable price
+     - internal strategic floor for stronger margin protection
 
-- Navigation switches to horizontal scroll chips on narrower screens.
-- Form grids collapse to single-column.
-- Header and action rows wrap cleanly.
-- Ingredient actions use larger tap targets and stack into full-width controls.
+6. **Rounding**
+   - Existing rounding rule is applied at the end.
+
+## Smart business behavior included
+
+- Margin Driver avoids unrealistically low recommendations.
+- Traffic Builder can stay tighter but warns on weak margin.
+- High labour + high perceived value supports stronger pricing.
+- Very low food cost % is not treated as an error for margin/premium strategies.
+- Flags include market positioning and contribution risk/opportunity cues.
+
+## Migration safety
+
+Older Dish objects are safely normalized with defaults:
+
+- `pricingStrategy = Standard`
+- `labourIntensity = Medium`
+- `perceivedValue = Medium`
+- `menuRole = Core Main`
+- `marketLowPrice = null`
+- `marketHighPrice = null`
+- `minimumAcceptablePrice = null`
+
+Legacy mixed records continue to be split safely into Recipes vs Dishes.
+
+## Sample data
+
+If localStorage is empty, sample data is auto-seeded to demonstrate Pricing Intelligence:
+
+- **Beer Battered Wings** (Margin Driver, high labour/high value, market-guided, significantly higher strategic recommendation)
+- **Grilled Chicken Bowl** (Standard strategy, closer formula vs final recommendation)
 
 ## Deployment constraints
 

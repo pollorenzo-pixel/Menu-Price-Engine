@@ -118,6 +118,47 @@
             <label>Reporting Period<input id="dish-period" placeholder="Last 30 Days" /></label>
             <label class="span3">Notes<input id="dish-notes" /></label>
           </div>
+
+          <h3>Pricing Intelligence</h3>
+          <div class="grid three intelligence-grid">
+            <label>Pricing Strategy
+              <select id="dish-pricing-strategy">
+                <option>Standard</option>
+                <option>Market-Based</option>
+                <option>Margin Driver</option>
+                <option>Traffic Builder</option>
+                <option>Premium Signature</option>
+              </select>
+            </label>
+            <label>Labour Intensity
+              <select id="dish-labour-intensity">
+                <option>Low</option>
+                <option selected>Medium</option>
+                <option>High</option>
+              </select>
+            </label>
+            <label>Perceived Value
+              <select id="dish-perceived-value">
+                <option>Low</option>
+                <option selected>Medium</option>
+                <option>High</option>
+              </select>
+            </label>
+            <label>Menu Role
+              <select id="dish-menu-role">
+                <option>Core Main</option>
+                <option>Side / Add-On</option>
+                <option>Signature Item</option>
+                <option>Combo Driver</option>
+                <option>Traffic Builder</option>
+                <option>High Margin Support</option>
+              </select>
+            </label>
+            <label>Market Low Price £<input id="dish-market-low" type="number" step="0.01" min="0" /></label>
+            <label>Market High Price £<input id="dish-market-high" type="number" step="0.01" min="0" /></label>
+            <label>Minimum Acceptable Price £<input id="dish-min-price" type="number" step="0.01" min="0" /></label>
+          </div>
+
           <h3>Dish Components</h3>
           <p class="muted">A dish can mix raw ingredients and prep recipes in the same component list.</p>
           <div class="row"><button id="dish-add-row" class="btn">Add Component</button><button class="btn" data-jump="analysis">Go to Analysis →</button></div>
@@ -132,7 +173,7 @@
       <section class="mode-panel" data-panel="analysis" hidden>
         <section class="card panel">
           <h2>Menu Analysis (Dishes Only)</h2>
-          <div class="table-wrap"><table><thead><tr><th>Dish</th><th>Class</th><th>Price</th><th>Food Cost %</th><th>Units</th><th>Revenue</th><th>Total GP</th><th>Action</th></tr></thead><tbody id="analysis-body"></tbody></table></div>
+          <div class="table-wrap"><table><thead><tr><th>Dish</th><th>Class</th><th>Formula</th><th>Final Reco</th><th>Current Price</th><th>Gap</th><th>Food Cost % @ Reco</th><th>Units</th><th>Total GP</th><th>Action</th></tr></thead><tbody id="analysis-body"></tbody></table></div>
         </section>
       </section>
 
