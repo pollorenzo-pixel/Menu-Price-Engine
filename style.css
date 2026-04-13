@@ -1,0 +1,259 @@
+:root {
+  --bg: #0f1117;
+  --panel: #171b24;
+  --panel-soft: #1d2430;
+  --text: #e8edf7;
+  --muted: #a5b0c3;
+  --line: #2a3343;
+  --accent: #67b5ff;
+  --good: #30b26c;
+  --warn: #f0ad4e;
+  --bad: #e35d6a;
+  --radius: 14px;
+  --shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: Inter, Segoe UI, Roboto, Arial, sans-serif;
+  background: radial-gradient(circle at top left, #1b2130, var(--bg) 50%);
+  color: var(--text);
+}
+
+.app-shell {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 1.25rem;
+}
+
+.page-header h1 {
+  margin: 0;
+  font-size: clamp(1.6rem, 2.2vw, 2.4rem);
+}
+
+.page-header p {
+  margin: 0.35rem 0 1rem;
+  color: var(--muted);
+}
+
+.layout-grid {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  gap: 1rem;
+}
+
+.panel {
+  background: linear-gradient(180deg, var(--panel), var(--panel-soft));
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 1rem;
+}
+
+.section-title-row {
+  margin: 0.35rem 0 0.75rem;
+}
+
+.section-title-row h2,
+.results-panel h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.section-title-row.with-action {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.field-grid {
+  display: grid;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.field-grid.two-col {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.field-grid.one-col {
+  grid-template-columns: 1fr;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.field span {
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+input,
+select,
+button {
+  font: inherit;
+}
+
+input,
+select {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #0f1420;
+  color: var(--text);
+  padding: 0.55rem 0.65rem;
+}
+
+input:focus,
+select:focus,
+button:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 70%, white 30%);
+  outline-offset: 1px;
+}
+
+.ingredient-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  margin-bottom: 1rem;
+}
+
+.ingredient-table {
+  width: 100%;
+  min-width: 900px;
+  border-collapse: collapse;
+}
+
+.ingredient-table th,
+.ingredient-table td {
+  border-bottom: 1px solid var(--line);
+  padding: 0.45rem;
+  text-align: left;
+}
+
+.ingredient-table th {
+  font-size: 0.8rem;
+  color: var(--muted);
+  background: #121826;
+}
+
+.ingredient-table tr:last-child td {
+  border-bottom: none;
+}
+
+.btn {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.55rem 0.8rem;
+  cursor: pointer;
+  color: var(--text);
+}
+
+.btn-secondary {
+  background: #1f2a3d;
+}
+
+.btn-danger {
+  background: #381b1f;
+  border-color: #63323a;
+}
+
+.btn-icon {
+  background: transparent;
+  color: var(--bad);
+  padding: 0.35rem 0.55rem;
+}
+
+.button-row {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.warnings {
+  min-height: 1.2rem;
+  margin: 0 0 0.75rem;
+  color: var(--warn);
+  font-size: 0.9rem;
+}
+
+.result-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.result-item {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.65rem 0.7rem;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.5rem;
+  align-items: baseline;
+}
+
+.result-item span {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.result-item strong {
+  font-size: 1rem;
+}
+
+.result-item small {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.value-good {
+  color: var(--good);
+}
+
+.value-warn {
+  color: var(--warn);
+}
+
+.value-bad {
+  color: var(--bad);
+}
+
+.insight-box {
+  margin-top: 1rem;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--accent);
+  border-radius: 10px;
+  padding: 0.8rem;
+  background: #111827;
+}
+
+.insight-box h3 {
+  margin: 0 0 0.35rem;
+  font-size: 0.92rem;
+}
+
+.insight-box p {
+  margin: 0;
+  color: var(--muted);
+}
+
+@media (max-width: 950px) {
+  .layout-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .field-grid.two-col {
+    grid-template-columns: 1fr;
+  }
+}
