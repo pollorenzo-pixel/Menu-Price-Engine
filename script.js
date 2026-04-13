@@ -38,6 +38,7 @@ const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
 const fmtCurrency = (value) => new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP' }).format(Number.isFinite(value) ? value : 0);
 const fmtNumber = (value, digits = 2) => (Number.isFinite(value) ? value : 0).toFixed(digits);
 const fmtPercent = (value) => `${fmtNumber(value, 2)}%`;
+const fmtInt = (value) => Math.round(toNumber(value, 0)).toLocaleString('en-GB');
 
 function setInlineMessage(el, message, type = 'warn') {
   el.textContent = message || '';
@@ -244,26 +245,32 @@ function migrateRecipe(raw) {
   const seeded = { ...defaultRecipe(), ...raw };
   const calc = calculateRecipeMetrics({ ...seeded, ingredientRows: (raw?.ingredientRows || []).map(migrateIngredientRow) }, { suppressWarnings: true });
   const roundedSuggestion = calc.roundedSellingPrice;
+  const legacySellingPrice = raw?.currentSellingPrice ?? raw?.priceSoldAt ?? raw?.menuPrice ?? raw?.manualMenuPrice;
+  const legacyUnitsSold = raw?.salesUnits ?? raw?.qtySold ?? raw?.quantitySold ?? raw?.unitsSold;
+  const portionFallback = raw?.portionsYielded ?? raw?.yieldPortions ?? raw?.servings;
+  const packagingFallback = raw?.packagingCostPerPortion ?? raw?.packagingCost ?? 0;
+  const labourFallback = raw?.labourCostPerPortion ?? raw?.laborCostPerPortion ?? raw?.labourCost ?? 0;
+  const targetFallback = raw?.targetFoodCostPercent ?? raw?.targetFoodCost ?? FOOD_COST_TARGET_DEFAULT;
   return {
     ...seeded,
     id: cleanText(raw?.id) || uid('rec'),
     name: cleanText(raw?.name),
     category: cleanText(raw?.category),
-    portionsYielded: Math.max(0.01, toNumber(raw?.portionsYielded, 10)),
-    packagingCostPerPortion: Math.max(0, toNumber(raw?.packagingCostPerPortion, 0)),
-    labourCostPerPortion: Math.max(0, toNumber(raw?.labourCostPerPortion, 0)),
-    targetFoodCostPercent: clamp(toNumber(raw?.targetFoodCostPercent, FOOD_COST_TARGET_DEFAULT), 0.01, 99.99),
+    portionsYielded: Math.max(0.01, toNumber(portionFallback, 10)),
+    packagingCostPerPortion: Math.max(0, toNumber(packagingFallback, 0)),
+    labourCostPerPortion: Math.max(0, toNumber(labourFallback, 0)),
+    targetFoodCostPercent: clamp(toNumber(targetFallback, FOOD_COST_TARGET_DEFAULT), 0.01, 99.99),
     vatRatePercent: Math.max(0, toNumber(raw?.vatRatePercent, 20)),
     deliveryCommissionPercent: Math.max(0, toNumber(raw?.deliveryCommissionPercent, 30)),
     roundingRule: toNumber(raw?.roundingRule, 0.25) || 0.25,
-    manualMenuPrice: raw?.manualMenuPrice === '' ? '' : Math.max(0, toNumber(raw?.manualMenuPrice, 0)),
-    sellingPrice: Math.max(0, toNumber(raw?.sellingPrice, roundedSuggestion || toNumber(raw?.manualMenuPrice, 0))),
-    unitsSold: Math.max(0, toNumber(raw?.unitsSold, 0)),
+    manualMenuPrice: raw?.manualMenuPrice === '' ? '' : Math.max(0, toNumber(raw?.manualMenuPrice ?? raw?.menuPrice ?? '', 0)),
+    sellingPrice: Math.max(0, toNumber(raw?.sellingPrice ?? legacySellingPrice, roundedSuggestion || toNumber(raw?.manualMenuPrice ?? raw?.menuPrice, 0))),
+    unitsSold: Math.max(0, Math.round(toNumber(legacyUnitsSold, 0))),
     reportingPeriod: cleanText(raw?.reportingPeriod || 'Last 30 Days'),
     internalScore: raw?.internalScore === '' ? '' : clamp(toNumber(raw?.internalScore, 0), 0, 10),
     isActive: typeof raw?.isActive === 'boolean' ? raw.isActive : true,
     itemNotes: cleanText(raw?.itemNotes),
-    revenueOverride: raw?.revenueOverride === '' ? '' : Math.max(0, toNumber(raw?.revenueOverride, 0)),
+    revenueOverride: raw?.revenueOverride === '' || raw?.revenueOverride === undefined || raw?.revenueOverride === null ? '' : Math.max(0, toNumber(raw?.revenueOverride, 0)),
     ingredientRows: Array.isArray(raw?.ingredientRows) && raw.ingredientRows.length ? raw.ingredientRows.map(migrateIngredientRow) : [defaultIngredientRow()],
     storageVersion: STORAGE_VERSION,
     createdAt: cleanText(raw?.createdAt) || nowIso(),
@@ -324,7 +331,7 @@ function calculateRecipeMetrics(recipe, options = {}) {
   const rawRevenue = effectiveMenuPrice * unitsSold;
   const revenue = recipe.revenueOverride === '' ? rawRevenue : Math.max(0, toNumber(recipe.revenueOverride, rawRevenue));
   const totalIngredientCostPeriod = totalCostPerPortionExclLabour * unitsSold;
-  const totalGrossProfit = grossProfitPerPortion * unitsSold;
+  const totalGrossProfit = revenue - totalIngredientCostPeriod;
 
   return {
     ...recipe,
@@ -393,17 +400,19 @@ function getRecommendedAction(item, prefs = state.prefs) {
   if (!item.isActive) return 'Inactive item. Keep for reference or reactivate.';
   const foodCostFlag = item.foodCostPercent > prefs.foodCostFlagTarget;
   if (item.grossProfitPerPortion <= 0) return 'Urgent: negative margin, reprice or redesign immediately.';
+  const avg = state.menuEngine?.averages ?? { unitsSold: 0, grossProfitPerPortion: 0 };
   const byClass = {
-    Star: 'Promote and protect.',
-    Plowhorse: 'Review pricing or reduce cost.',
-    Puzzle: 'Improve visibility and push sales.',
-    Dog: 'Consider removing or redesigning.',
-    Unclassified: 'Collect more data before deciding.',
+    Star: 'Keep prominent placement and protect price integrity.',
+    Plowhorse: 'Test a small (£0.25-£0.50) price increase or 5-10% cost reduction.',
+    Puzzle: 'Improve visibility (photo, naming, position) and add a combo/upsell.',
+    Dog: 'Run a 2-week rescue test; if no movement, retire or fully redesign.',
+    Unclassified: 'Collect one full period of sales before deciding.',
   };
 
   let text = byClass[item.classification] || 'Review performance and adjust.';
-  if (foodCostFlag && item.unitsSold >= state.prefs.lowUnitsThreshold) text += ' Sells well but margin needs work.';
-  if (item.classification === 'Puzzle' && item.grossProfitPerPortion > state.menuEngine?.averages?.grossProfitPerPortion) text += ' Profitable but may need stronger menu placement.';
+  if (foodCostFlag && item.unitsSold >= state.prefs.lowUnitsThreshold) text += ' High volume item, so margin optimisation is high impact.';
+  if (item.classification === 'Puzzle' && item.grossProfitPerPortion > avg.grossProfitPerPortion) text += ' It is profitable enough to feature more aggressively.';
+  if (item.classification === 'Star' && item.unitsSold >= avg.unitsSold) text += ' Avoid discounting unless needed for seasonal demand.';
   return text;
 }
 
@@ -449,6 +458,7 @@ function buildDashboard(items, menuEngine) {
   };
 
   const insights = [];
+  if (!activeItems.length) insights.push('No active items. Mark items active to start dashboard analysis.');
   if (totals.dogs > 0) insights.push(`${totals.dogs} Dog item(s) need redesign or removal review.`);
   if (highFoodCost.length > 0) insights.push(`${highFoodCost.length} item(s) are above food cost target (${state.prefs.foodCostFlagTarget}%).`);
   if (totals.puzzles > 0) insights.push(`${totals.puzzles} Puzzle item(s) are profitable but under-ordered.`);
@@ -564,7 +574,7 @@ function readRecipeFromForm() {
     roundingRule: toNumber(dom.fields.rounding.value, 0.25),
     manualMenuPrice: dom.fields.manual.value === '' ? '' : toNumber(dom.fields.manual.value, 0),
     sellingPrice: toNumber(dom.fields.sellingPrice.value, 0),
-    unitsSold: toNumber(dom.fields.unitsSold.value, 0),
+    unitsSold: Math.max(0, Math.round(toNumber(dom.fields.unitsSold.value, 0))),
     reportingPeriod: cleanText(dom.fields.reportingPeriod.value || 'Last 30 Days'),
     internalScore: dom.fields.internalScore.value === '' ? '' : clamp(toNumber(dom.fields.internalScore.value, 0), 0, 10),
     isActive: dom.fields.isActive.value === 'true',
@@ -748,6 +758,11 @@ function renderRecipeList() {
   dom.recipeCount.textContent = String(filtered.length);
   dom.recipeList.innerHTML = '';
 
+  if (!filtered.length) {
+    dom.recipeList.innerHTML = '<li class="empty-state">No recipes found. Adjust search/filter or create a new recipe.</li>';
+    return;
+  }
+
   filtered.forEach((recipe) => {
     const li = document.createElement('li');
     li.className = `recipe-item ${state.activeRecipeId === recipe.id ? 'active' : ''}`;
@@ -776,6 +791,10 @@ function renderIngredientLibrary() {
   const rows = state.ingredients.filter((ing) => !search || safeLower(ing.name).includes(search));
   dom.library.count.textContent = String(rows.length);
   dom.library.body.innerHTML = '';
+  if (!rows.length) {
+    dom.library.body.innerHTML = '<tr class="analysis-empty"><td colspan="7">No ingredients found for this search.</td></tr>';
+    return;
+  }
 
   rows.forEach((ing) => {
     const tr = document.createElement('tr');
@@ -877,7 +896,7 @@ function renderDashboard() {
     <li>Items missing sales data: ${dashboard.flagCounts.missingSalesData}</li>
   `;
 
-  dom.topUnitsList.innerHTML = dashboard.topUnits.map((i) => `<li>${i.name} (${i.unitsSold} units)</li>`).join('') || '<li>No active items.</li>';
+  dom.topUnitsList.innerHTML = dashboard.topUnits.map((i) => `<li>${i.name} (${fmtInt(i.unitsSold)} units)</li>`).join('') || '<li>No active items.</li>';
   dom.topProfitList.innerHTML = dashboard.topProfit.map((i) => `<li>${i.name} (${fmtCurrency(i.totalGrossProfit)})</li>`).join('') || '<li>No active items.</li>';
   dom.menuInsightList.innerHTML = dashboard.insights.map((text) => `<li>${text}</li>`).join('');
 
@@ -896,12 +915,15 @@ function renderDashboard() {
 }
 
 function renderAnalysisTable(classifiedItems) {
-  let rows = classifiedItems.filter((item) => item.isActive);
+  let rows = [...classifiedItems];
   const q = safeLower(state.analysisSearch);
   if (q) rows = rows.filter((i) => safeLower(i.name).includes(q));
   if (state.analysisClassFilter !== 'all') rows = rows.filter((i) => i.classification === state.analysisClassFilter);
 
   const key = state.sort.key;
+  dom.analysisTable.querySelectorAll('th[data-sort]').forEach((th) => {
+    th.classList.toggle('sorting-active', th.dataset.sort === key);
+  });
   const dir = state.sort.dir === 'asc' ? 1 : -1;
   rows.sort((a, b) => {
     const av = a[key];
@@ -909,6 +931,11 @@ function renderAnalysisTable(classifiedItems) {
     if (typeof av === 'string' || typeof bv === 'string') return String(av).localeCompare(String(bv)) * dir;
     return (toNumber(av, 0) - toNumber(bv, 0)) * dir;
   });
+
+  if (!rows.length) {
+    dom.analysisBody.innerHTML = '<tr class="analysis-empty"><td colspan="11">No items match the current search/filter.</td></tr>';
+    return;
+  }
 
   dom.analysisBody.innerHTML = rows.map((item) => {
     const badge = `<span class="badge ${getBadgeClass(item.classification)}">${item.classification}</span>`;
@@ -921,7 +948,7 @@ function renderAnalysisTable(classifiedItems) {
         <td>${fmtCurrency(item.totalCostPerPortionExclLabour)}</td>
         <td class="${item.grossProfitPerPortion > 0 ? 'value-good' : 'value-bad'}">${fmtCurrency(item.grossProfitPerPortion)}</td>
         <td class="${item.foodCostPercent > state.prefs.foodCostFlagTarget ? 'value-warn' : ''}">${fmtPercent(item.foodCostPercent)}</td>
-        <td>${item.unitsSold}</td>
+        <td>${fmtInt(item.unitsSold)}</td>
         <td>${fmtCurrency(item.revenue)}</td>
         <td>${fmtCurrency(item.totalGrossProfit)}</td>
         <td>${item.action}</td>
@@ -940,6 +967,10 @@ function renderMatrix(classifiedItems, menuEngine) {
     label.textContent = c[0].toUpperCase() + c.slice(1);
     dom.matrixChart.appendChild(label);
   });
+  dom.matrixChart.insertAdjacentHTML('beforeend', `
+    <div class="matrix-axis y">Higher gross profit / portion</div>
+    <div class="matrix-axis x">Higher units sold</div>
+  `);
 
   if (menuEngine.fallback || active.length < 2) {
     dom.matrixFallback.textContent = menuEngine.fallback || 'Add more active items to view matrix.';
@@ -949,6 +980,10 @@ function renderMatrix(classifiedItems, menuEngine) {
 
   const maxUnits = Math.max(...active.map((i) => i.unitsSold), menuEngine.averages.unitsSold);
   const maxProfit = Math.max(...active.map((i) => i.grossProfitPerPortion), menuEngine.averages.grossProfitPerPortion, 0.01);
+  const avgX = clamp((menuEngine.averages.unitsSold / maxUnits) * 100, 0, 100);
+  const avgY = clamp((menuEngine.averages.grossProfitPerPortion / maxProfit) * 100, 0, 100);
+  dom.matrixChart.insertAdjacentHTML('beforeend', `<div class="matrix-average-line y" style="left:${avgX}%"></div>`);
+  dom.matrixChart.insertAdjacentHTML('beforeend', `<div class="matrix-average-line x" style="bottom:${avgY}%"></div>`);
 
   active.forEach((item) => {
     const xPct = clamp((item.unitsSold / maxUnits) * 100, 4, 96);
@@ -958,7 +993,7 @@ function renderMatrix(classifiedItems, menuEngine) {
     point.style.left = `${xPct}%`;
     point.style.bottom = `${yPct}%`;
     point.title = `${item.name} · ${item.classification}`;
-    point.textContent = item.name;
+    point.textContent = item.name.length > 18 ? `${item.name.slice(0, 17)}…` : item.name;
     dom.matrixChart.appendChild(point);
   });
 }
