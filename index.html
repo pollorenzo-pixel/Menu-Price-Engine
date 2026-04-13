@@ -18,7 +18,7 @@
         </div>
       </header>
 
-      <nav class="mode-nav card" aria-label="App modes">
+      <nav id="mode-nav" class="mode-nav card" aria-label="App modes">
         <button class="mode-tab active" data-mode="home" type="button">Home</button>
         <button class="mode-tab" data-mode="recipes" type="button">Recipes &amp; Costing</button>
         <button class="mode-tab" data-mode="analysis" type="button">Menu Analysis</button>
@@ -56,14 +56,14 @@
         <section class="card dashboard-block">
           <div class="panel-head"><h3>Quick actions</h3></div>
           <div class="button-row home-actions">
-            <button id="new-recipe-btn" class="btn btn-accent" type="button">New Recipe</button>
-            <button id="open-library-btn" class="btn" type="button">Open Ingredient Library</button>
-            <button id="weekly-review-nav-btn" class="btn btn-secondary" type="button">Go to Weekly Review</button>
+            <button id="new-recipe-btn" class="btn btn-accent" data-open-mode="recipes" type="button">New Recipe</button>
+            <button id="open-library-btn" class="btn" data-open-mode="ingredients" type="button">Open Ingredient Library</button>
+            <button id="weekly-review-nav-btn" class="btn btn-secondary" data-open-mode="weekly" type="button">Go to Weekly Review</button>
           </div>
         </section>
       </section>
 
-      <section class="mode-panel" data-mode-panel="recipes">
+      <section class="mode-panel" data-mode-panel="recipes" hidden>
         <main class="workspace-grid">
           <aside class="panel card" aria-label="Saved menu items">
             <div class="panel-head"><h2>Saved Menu Items</h2><span id="recipe-count" class="count-pill">0</span></div>
@@ -120,7 +120,7 @@
         </main>
       </section>
 
-      <section class="mode-panel" data-mode-panel="analysis">
+      <section class="mode-panel" data-mode-panel="analysis" hidden>
         <section class="card dashboard-block">
           <div class="panel-head"><h2>Menu Analysis</h2></div>
           <div class="analysis-controls">
@@ -137,7 +137,7 @@
         </section>
       </section>
 
-      <section class="mode-panel" data-mode-panel="reports">
+      <section class="mode-panel" data-mode-panel="reports" hidden>
         <section class="card dashboard-block report-controls">
           <div class="panel-head"><h2>Reporting Controls</h2></div>
           <div class="report-toolbar">
@@ -178,7 +178,7 @@
         </section>
       </section>
 
-      <section class="mode-panel" data-mode-panel="weekly">
+      <section class="mode-panel" data-mode-panel="weekly" hidden>
         <section id="weekly-review-section" class="card dashboard-block weekly-review-block">
           <div class="panel-head"><h2>Weekly Review</h2><span id="weekly-review-status" class="count-pill">Not started</span></div>
           <div class="weekly-step-indicator" id="weekly-step-indicator"></div>
@@ -205,9 +205,9 @@
         </section>
       </section>
 
-      <section class="mode-panel" data-mode-panel="ingredients">
+      <section class="mode-panel" data-mode-panel="ingredients" hidden>
         <section id="library-modal" class="card dashboard-block" aria-hidden="false">
-          <div class="panel-head"><h2>Ingredient Library</h2><button id="close-library-btn" class="btn" type="button">Back Home</button></div>
+          <div class="panel-head"><h2>Ingredient Library</h2><button id="close-library-btn" class="btn" data-open-mode="home" type="button">Back Home</button></div>
           <div id="library-errors" class="inline-errors"></div>
           <div class="field-grid three-col"><label class="field"><span>Name *</span><input id="lib-name" type="text" /></label><label class="field"><span>Price £ *</span><input id="lib-price" type="number" min="0" step="0.01" /></label><label class="field"><span>Pack Size *</span><input id="lib-pack-size" type="number" min="0.0001" step="0.0001" /></label><label class="field"><span>Pack Unit *</span><select id="lib-pack-unit"><option value="">Select</option><option value="g">g</option><option value="kg">kg</option><option value="ml">ml</option><option value="l">l</option><option value="unit">unit</option></select></label><label class="field"><span>Supplier</span><input id="lib-supplier" type="text" /></label><label class="field"><span>Notes</span><input id="lib-notes" type="text" /></label></div>
           <div class="button-row"><button id="add-ingredient-btn" class="btn btn-accent" type="button">Add</button><button id="update-ingredient-btn" class="btn" type="button">Update</button><button id="clear-ingredient-form-btn" class="btn btn-secondary" type="button">Clear</button><span id="ingredient-count" class="count-pill">0</span></div>
