@@ -20,7 +20,7 @@
         </div>
       </header>
 
-      <section class="card dashboard-block">
+      <section class="card dashboard-block report-controls">
         <div class="panel-head"><h2>Reporting Controls</h2></div>
         <div class="report-toolbar">
           <label class="field"><span>Snapshot Name *</span><input id="snapshot-name" type="text" placeholder="e.g. April 2026 Review" /></label>
@@ -98,6 +98,11 @@
       </main>
 
       <section class="card dashboard-block"><div class="panel-head"><h2>Review Dashboard</h2><span id="period-label" class="meta-text">Period: mixed</span></div><div id="dashboard-cards" class="dashboard-cards"></div><div class="dashboard-row"><div class="card-light"><h3>Key Review Highlights</h3><ul id="menu-insight-list"></ul></div><div class="card-light"><h3>Action Priorities</h3><ul id="priority-list"></ul></div><div class="card-light"><h3>Snapshot Library</h3><ul id="snapshot-list"></ul></div><div class="card-light"><h3>Comparison Summary</h3><ul id="comparison-summary"></ul></div></div></section>
+
+      <section id="print-summary-sheet" class="card dashboard-block print-summary-sheet">
+        <div class="panel-head"><h2>Print-Friendly Review Summary</h2><span class="meta-text">Automatically updates with dashboard state</span></div>
+        <pre id="review-summary-output"></pre>
+      </section>
 
       <section class="card dashboard-block"><div class="panel-head"><h2>Popularity vs Profitability Matrix</h2></div><div id="matrix-fallback" class="helper-text"></div><div id="matrix-chart" class="matrix-chart"></div></section>
 
