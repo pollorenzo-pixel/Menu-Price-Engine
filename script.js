@@ -1,1230 +1,582 @@
-/* ==============================
-   Constants and Storage Keys
-================================ */
-const STORAGE_VERSION = 3;
+const STORAGE_VERSION = 4;
 const STORAGE_KEYS = {
-  ingredients: 'mpe_v3_ingredients',
-  recipes: 'mpe_v3_recipes',
-  draft: 'mpe_v3_active_draft',
-  seeded: 'mpe_v3_seeded',
-  prefs: 'mpe_v3_dashboard_prefs',
-  legacyIngredients: 'mpe_v2_ingredients',
-  legacyRecipes: 'mpe_v2_recipes',
-  legacyDraft: 'mpe_v2_active_draft',
-  legacySeeded: 'mpe_v2_seeded',
+  ingredients: 'mpe_v4_ingredients', recipes: 'mpe_v4_recipes', draft: 'mpe_v4_active_draft', seeded: 'mpe_v4_seeded',
+  snapshots: 'mpe_v4_snapshots', prefs: 'mpe_v4_prefs', compareNotes: 'mpe_v4_compare_notes',
+  legacyIngredients: 'mpe_v3_ingredients', legacyRecipes: 'mpe_v3_recipes', legacyDraft: 'mpe_v3_active_draft', legacySeeded: 'mpe_v3_seeded',
 };
-
 const PACK_UNITS = ['g', 'kg', 'ml', 'l', 'unit'];
 const UNIT_GROUP = { g: 'weight', kg: 'weight', ml: 'volume', l: 'volume', unit: 'count' };
 const BASE_FACTOR = { g: 1, kg: 1000, ml: 1, l: 1000, unit: 1 };
-const FOOD_COST_TARGET_DEFAULT = 30;
 
-/* ==============================
-   Utility Helpers
-================================ */
+const $ = (id) => document.getElementById(id);
+const uid = (p) => `${p}_${Math.random().toString(36).slice(2, 9)}_${Date.now().toString(36)}`;
 const nowIso = () => new Date().toISOString();
-const uid = (prefix) => `${prefix}_${Math.random().toString(36).slice(2, 10)}_${Date.now().toString(36)}`;
-const toNumber = (v, fallback = 0) => {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : fallback;
-};
 const cleanText = (v) => String(v ?? '').trim();
+const toNumber = (v, f = 0) => Number.isFinite(Number(v)) ? Number(v) : f;
 const safeLower = (v) => cleanText(v).toLowerCase();
 const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
+const fmtCurrency = (v) => new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP' }).format(toNumber(v, 0));
+const fmtPercent = (v) => `${toNumber(v, 0).toFixed(2)}%`;
+const fmtInt = (v) => Math.round(toNumber(v, 0)).toLocaleString('en-GB');
 
-/* ==============================
-   Formatting Helpers
-================================ */
-const fmtCurrency = (value) => new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP' }).format(Number.isFinite(value) ? value : 0);
-const fmtNumber = (value, digits = 2) => (Number.isFinite(value) ? value : 0).toFixed(digits);
-const fmtPercent = (value) => `${fmtNumber(value, 2)}%`;
-const fmtInt = (value) => Math.round(toNumber(value, 0)).toLocaleString('en-GB');
-
-function setInlineMessage(el, message, type = 'warn') {
-  el.textContent = message || '';
-  el.classList.toggle('success', type === 'success');
-}
-
-/* ==============================
-   Storage Helpers
-================================ */
-function safeParse(raw, fallback) {
-  try {
-    const parsed = JSON.parse(raw);
-    return parsed ?? fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-function getStoredArray(key) {
-  const parsed = safeParse(localStorage.getItem(key), []);
-  return Array.isArray(parsed) ? parsed : [];
-}
-
-function getStoredObject(key, fallback = {}) {
-  const parsed = safeParse(localStorage.getItem(key), fallback);
-  return parsed && typeof parsed === 'object' ? parsed : fallback;
-}
-
-function setStored(key, value) {
-  localStorage.setItem(key, JSON.stringify(value));
-}
-
-/* ==============================
-   Unit Conversion
-================================ */
-function convertUnit(value, fromUnit, toUnit) {
-  if (!fromUnit || !toUnit) return { ok: false, value: null, reason: 'Missing units' };
-  if (UNIT_GROUP[fromUnit] !== UNIT_GROUP[toUnit]) return { ok: false, value: null, reason: `Cannot convert ${fromUnit} to ${toUnit}` };
-  return { ok: true, value: (value * BASE_FACTOR[fromUnit]) / BASE_FACTOR[toUnit], reason: '' };
-}
-
-/* ==============================
-   App State
-================================ */
 const state = {
-  ingredients: [],
-  recipes: [],
-  activeRecipeId: null,
-  ingredientEditingId: null,
-  recipeSearch: '',
-  recipeStatusFilter: 'all',
-  ingredientSearch: '',
-  analysisSearch: '',
-  analysisClassFilter: 'all',
-  sort: { key: 'name', dir: 'asc' },
-  draft: null,
+  ingredients: [], recipes: [], snapshots: [], draft: null,
+  activeRecipeId: null, ingredientEditingId: null,
+  recipeSearch: '', recipeStatusFilter: 'all', ingredientSearch: '', analysisSearch: '', analysisClassFilter: 'all',
+  compareSearch: '', compareMovementFilter: 'all',
+  sort: { key: 'name', dir: 'asc' }, csort: { key: 'revenueChange', dir: 'desc' },
   prefs: { foodCostFlagTarget: 32, lowUnitsThreshold: 25 },
-  menuEngine: null,
+  menuEngine: null, comparison: null,
 };
 
-/* ==============================
-   Defaults + Sample Data
-================================ */
-function defaultIngredientRow() {
-  return {
-    rowId: uid('row'), ingredientId: '', ingredientNameSnapshot: '',
-    purchasePriceSnapshot: 0, packSizeSnapshot: 1, packUnitSnapshot: 'g',
-    amountUsed: 0, useUnit: 'g', calculatedCostUsed: 0,
-  };
-}
-
-function defaultRecipe() {
-  return {
-    id: null,
-    name: '',
-    category: '',
-    portionsYielded: 10,
-    packagingCostPerPortion: 0,
-    labourCostPerPortion: 0,
-    targetFoodCostPercent: FOOD_COST_TARGET_DEFAULT,
-    vatRatePercent: 20,
-    deliveryCommissionPercent: 30,
-    roundingRule: 0.25,
-    manualMenuPrice: '',
-    ingredientRows: [defaultIngredientRow()],
-    sellingPrice: 0,
-    unitsSold: 0,
-    reportingPeriod: 'Last 30 Days',
-    internalScore: '',
-    isActive: true,
-    itemNotes: '',
-    revenueOverride: '',
-    storageVersion: STORAGE_VERSION,
-    createdAt: null,
-    updatedAt: null,
-  };
-}
-
-function sampleIngredients() {
-  return [
-    { id: uid('ing'), name: 'Baguette', purchasePrice: 8.4, packSize: 12, packUnit: 'unit', supplier: 'Metro Bakery', notes: 'Case of 12' },
-    { id: uid('ing'), name: 'Chicken Thigh', purchasePrice: 24, packSize: 5, packUnit: 'kg', supplier: 'Kiju Butchery', notes: 'Boneless' },
-    { id: uid('ing'), name: 'Tofu', purchasePrice: 9.8, packSize: 2, packUnit: 'kg', supplier: 'Tofu House', notes: '' },
-    { id: uid('ing'), name: 'Chicken Wings', purchasePrice: 18, packSize: 5, packUnit: 'kg', supplier: 'Kiju Butchery', notes: '' },
-    { id: uid('ing'), name: 'Pickled Carrot', purchasePrice: 3.9, packSize: 1, packUnit: 'kg', supplier: '', notes: '' },
-    { id: uid('ing'), name: 'Daikon', purchasePrice: 2.8, packSize: 1, packUnit: 'kg', supplier: '', notes: '' },
-    { id: uid('ing'), name: 'Cucumber', purchasePrice: 5.5, packSize: 10, packUnit: 'unit', supplier: '', notes: '' },
-    { id: uid('ing'), name: 'Coriander', purchasePrice: 1.6, packSize: 100, packUnit: 'g', supplier: '', notes: '' },
-    { id: uid('ing'), name: 'Spring Onion', purchasePrice: 1.2, packSize: 100, packUnit: 'g', supplier: '', notes: '' },
-    { id: uid('ing'), name: 'Mayo', purchasePrice: 7.2, packSize: 2, packUnit: 'kg', supplier: '', notes: '' },
-    { id: uid('ing'), name: 'Soy Glaze', purchasePrice: 5.8, packSize: 1, packUnit: 'l', supplier: '', notes: '' },
-    { id: uid('ing'), name: 'Chilli Sauce', purchasePrice: 4.6, packSize: 1, packUnit: 'l', supplier: '', notes: '' },
-    { id: uid('ing'), name: 'Salad Leaves', purchasePrice: 6.9, packSize: 500, packUnit: 'g', supplier: '', notes: '' },
-    { id: uid('ing'), name: 'Rice Noodles', purchasePrice: 12, packSize: 3, packUnit: 'kg', supplier: '', notes: '' },
-    { id: uid('ing'), name: 'Takeaway Wrapper', purchasePrice: 5.2, packSize: 100, packUnit: 'unit', supplier: '', notes: '' },
-    { id: uid('ing'), name: 'Takeaway Bowl', purchasePrice: 12, packSize: 100, packUnit: 'unit', supplier: '', notes: '' },
-  ];
-}
-
-function sampleRecipes(ingredients) {
-  const find = (name) => ingredients.find((ing) => safeLower(ing.name) === safeLower(name));
-  const row = (name, amountUsed, useUnit) => {
-    const ing = find(name);
-    return {
-      rowId: uid('row'), ingredientId: ing?.id ?? '', ingredientNameSnapshot: ing?.name ?? name,
-      purchasePriceSnapshot: ing?.purchasePrice ?? 0, packSizeSnapshot: ing?.packSize ?? 1, packUnitSnapshot: ing?.packUnit ?? useUnit,
-      amountUsed, useUnit, calculatedCostUsed: 0,
-    };
-  };
-
-  const base = [
-    {
-      name: 'Chicken Banh Mi', category: 'Sandwich', portionsYielded: 10, packagingCostPerPortion: 0.32, labourCostPerPortion: 0.6,
-      targetFoodCostPercent: 28, vatRatePercent: 20, deliveryCommissionPercent: 30, roundingRule: 0.25, manualMenuPrice: 8.5,
-      sellingPrice: 8.5, unitsSold: 320, reportingPeriod: 'Last 30 Days', internalScore: 8.9, isActive: true, revenueOverride: '',
-      ingredientRows: [
-        row('Baguette', 10, 'unit'), row('Chicken Thigh', 1500, 'g'), row('Pickled Carrot', 300, 'g'),
-        row('Daikon', 200, 'g'), row('Coriander', 20, 'g'), row('Spring Onion', 20, 'g'),
-        row('Mayo', 180, 'g'), row('Soy Glaze', 80, 'ml'), row('Chilli Sauce', 70, 'ml'), row('Takeaway Wrapper', 10, 'unit'),
-      ],
-    },
-    {
-      name: 'Chicken Salad Bowl', category: 'Bowl', portionsYielded: 8, packagingCostPerPortion: 0.42, labourCostPerPortion: 0.8,
-      targetFoodCostPercent: 30, vatRatePercent: 20, deliveryCommissionPercent: 32, roundingRule: 0.5, manualMenuPrice: 10.5,
-      sellingPrice: 10.5, unitsSold: 260, reportingPeriod: 'Last 30 Days', internalScore: 8.2, isActive: true, revenueOverride: '',
-      ingredientRows: [
-        row('Chicken Thigh', 1600, 'g'), row('Salad Leaves', 320, 'g'), row('Cucumber', 4, 'unit'), row('Pickled Carrot', 220, 'g'),
-        row('Spring Onion', 25, 'g'), row('Soy Glaze', 120, 'ml'), row('Takeaway Bowl', 8, 'unit'),
-      ],
-    },
-    {
-      name: 'Tofu Salad Bowl', category: 'Bowl', portionsYielded: 8, packagingCostPerPortion: 0.42, labourCostPerPortion: 0.7,
-      targetFoodCostPercent: 29, vatRatePercent: 20, deliveryCommissionPercent: 32, roundingRule: 0.5, manualMenuPrice: 9.95,
-      sellingPrice: 9.95, unitsSold: 65, reportingPeriod: 'Last 30 Days', internalScore: 7.3, isActive: true, revenueOverride: '',
-      ingredientRows: [
-        row('Tofu', 1500, 'g'), row('Salad Leaves', 350, 'g'), row('Cucumber', 5, 'unit'), row('Pickled Carrot', 220, 'g'),
-        row('Spring Onion', 25, 'g'), row('Soy Glaze', 140, 'ml'), row('Takeaway Bowl', 8, 'unit'),
-      ],
-    },
-    {
-      name: 'Wings', category: 'Sides', portionsYielded: 10, packagingCostPerPortion: 0.22, labourCostPerPortion: 0.45,
-      targetFoodCostPercent: 27, vatRatePercent: 20, deliveryCommissionPercent: 30, roundingRule: 0.25, manualMenuPrice: 7.75,
-      sellingPrice: 7.75, unitsSold: 95, reportingPeriod: 'Last 30 Days', internalScore: 7.1, isActive: true, revenueOverride: '',
-      ingredientRows: [
-        row('Chicken Wings', 1800, 'g'), row('Soy Glaze', 110, 'ml'), row('Chilli Sauce', 120, 'ml'), row('Spring Onion', 30, 'g'), row('Takeaway Wrapper', 10, 'unit'),
-      ],
-    },
-  ];
-
-  const stamp = nowIso();
-  return base.map((r) => ({ ...defaultRecipe(), ...r, id: uid('rec'), createdAt: stamp, updatedAt: stamp, storageVersion: STORAGE_VERSION }));
-}
-
-/* ==============================
-   Migration Helpers
-================================ */
-function migrateIngredient(raw) {
-  return {
-    id: cleanText(raw?.id) || uid('ing'),
-    name: cleanText(raw?.name),
-    purchasePrice: Math.max(0, toNumber(raw?.purchasePrice, 0)),
-    packSize: Math.max(0.0001, toNumber(raw?.packSize, 1)),
-    packUnit: PACK_UNITS.includes(raw?.packUnit) ? raw.packUnit : 'g',
-    supplier: cleanText(raw?.supplier),
-    notes: cleanText(raw?.notes),
-  };
-}
-
-function migrateIngredientRow(raw) {
-  return {
-    rowId: cleanText(raw?.rowId) || uid('row'),
-    ingredientId: cleanText(raw?.ingredientId),
-    ingredientNameSnapshot: cleanText(raw?.ingredientNameSnapshot ?? raw?.name ?? ''),
-    purchasePriceSnapshot: Math.max(0, toNumber(raw?.purchasePriceSnapshot ?? raw?.purchasePrice, 0)),
-    packSizeSnapshot: Math.max(0.0001, toNumber(raw?.packSizeSnapshot ?? raw?.packSize, 1)),
-    packUnitSnapshot: PACK_UNITS.includes(raw?.packUnitSnapshot ?? raw?.packUnit) ? (raw?.packUnitSnapshot ?? raw?.packUnit) : 'g',
-    amountUsed: Math.max(0, toNumber(raw?.amountUsed, 0)),
-    useUnit: PACK_UNITS.includes(raw?.useUnit) ? raw.useUnit : 'g',
-    calculatedCostUsed: Math.max(0, toNumber(raw?.calculatedCostUsed, 0)),
-  };
-}
-
-function migrateRecipe(raw) {
-  const seeded = { ...defaultRecipe(), ...raw };
-  const calc = calculateRecipeMetrics({ ...seeded, ingredientRows: (raw?.ingredientRows || []).map(migrateIngredientRow) }, { suppressWarnings: true });
-  const roundedSuggestion = calc.roundedSellingPrice;
-  const legacySellingPrice = raw?.currentSellingPrice ?? raw?.priceSoldAt ?? raw?.menuPrice ?? raw?.manualMenuPrice;
-  const legacyUnitsSold = raw?.salesUnits ?? raw?.qtySold ?? raw?.quantitySold ?? raw?.unitsSold;
-  const portionFallback = raw?.portionsYielded ?? raw?.yieldPortions ?? raw?.servings;
-  const packagingFallback = raw?.packagingCostPerPortion ?? raw?.packagingCost ?? 0;
-  const labourFallback = raw?.labourCostPerPortion ?? raw?.laborCostPerPortion ?? raw?.labourCost ?? 0;
-  const targetFallback = raw?.targetFoodCostPercent ?? raw?.targetFoodCost ?? FOOD_COST_TARGET_DEFAULT;
-  return {
-    ...seeded,
-    id: cleanText(raw?.id) || uid('rec'),
-    name: cleanText(raw?.name),
-    category: cleanText(raw?.category),
-    portionsYielded: Math.max(0.01, toNumber(portionFallback, 10)),
-    packagingCostPerPortion: Math.max(0, toNumber(packagingFallback, 0)),
-    labourCostPerPortion: Math.max(0, toNumber(labourFallback, 0)),
-    targetFoodCostPercent: clamp(toNumber(targetFallback, FOOD_COST_TARGET_DEFAULT), 0.01, 99.99),
-    vatRatePercent: Math.max(0, toNumber(raw?.vatRatePercent, 20)),
-    deliveryCommissionPercent: Math.max(0, toNumber(raw?.deliveryCommissionPercent, 30)),
-    roundingRule: toNumber(raw?.roundingRule, 0.25) || 0.25,
-    manualMenuPrice: raw?.manualMenuPrice === '' ? '' : Math.max(0, toNumber(raw?.manualMenuPrice ?? raw?.menuPrice ?? '', 0)),
-    sellingPrice: Math.max(0, toNumber(raw?.sellingPrice ?? legacySellingPrice, roundedSuggestion || toNumber(raw?.manualMenuPrice ?? raw?.menuPrice, 0))),
-    unitsSold: Math.max(0, Math.round(toNumber(legacyUnitsSold, 0))),
-    reportingPeriod: cleanText(raw?.reportingPeriod || 'Last 30 Days'),
-    internalScore: raw?.internalScore === '' ? '' : clamp(toNumber(raw?.internalScore, 0), 0, 10),
-    isActive: typeof raw?.isActive === 'boolean' ? raw.isActive : true,
-    itemNotes: cleanText(raw?.itemNotes),
-    revenueOverride: raw?.revenueOverride === '' || raw?.revenueOverride === undefined || raw?.revenueOverride === null ? '' : Math.max(0, toNumber(raw?.revenueOverride, 0)),
-    ingredientRows: Array.isArray(raw?.ingredientRows) && raw.ingredientRows.length ? raw.ingredientRows.map(migrateIngredientRow) : [defaultIngredientRow()],
-    storageVersion: STORAGE_VERSION,
-    createdAt: cleanText(raw?.createdAt) || nowIso(),
-    updatedAt: cleanText(raw?.updatedAt) || nowIso(),
-  };
-}
-
-/* ==============================
-   Calculation Engine (Stage 2 + 3)
-================================ */
-function calculateRowCost(row) {
-  const purchasePrice = Math.max(0, toNumber(row.purchasePriceSnapshot, 0));
-  const packSize = Math.max(0.0001, toNumber(row.packSizeSnapshot, 1));
-  const amountUsed = Math.max(0, toNumber(row.amountUsed, 0));
-
-  const converted = convertUnit(amountUsed, row.useUnit, row.packUnitSnapshot);
-  if (!converted.ok) return { cost: 0, warning: converted.reason };
-
-  const unitCost = purchasePrice / packSize;
-  return { cost: unitCost * converted.value, warning: '' };
-}
-
-function roundToRule(value, rule = 0.25) {
-  if (!Number.isFinite(value) || value <= 0) return 0;
-  if (!Number.isFinite(rule) || rule <= 0) return value;
-  return Math.round(value / rule) * rule;
-}
-
-function calculateRecipeMetrics(recipe, options = {}) {
-  const warnings = [];
-  const rows = Array.isArray(recipe.ingredientRows) ? recipe.ingredientRows : [];
-  let totalIngredientCost = 0;
-  const computedRows = rows.map((row) => {
-    const calc = calculateRowCost(row);
-    if (calc.warning && !options.suppressWarnings) warnings.push(`${row.ingredientNameSnapshot || 'Row'}: ${calc.warning}`);
-    totalIngredientCost += calc.cost;
-    return { ...row, calculatedCostUsed: calc.cost };
-  });
-
-  const portions = Math.max(0.01, toNumber(recipe.portionsYielded, 10));
-  const ingredientCostPerPortion = totalIngredientCost / portions;
-  const totalCostPerPortionExclLabour = ingredientCostPerPortion + Math.max(0, toNumber(recipe.packagingCostPerPortion, 0));
-  const totalCostPerPortionInclLabour = totalCostPerPortionExclLabour + Math.max(0, toNumber(recipe.labourCostPerPortion, 0));
-  const targetFoodCostPct = clamp(toNumber(recipe.targetFoodCostPercent, FOOD_COST_TARGET_DEFAULT), 0.01, 99.99);
-  const suggestedNetSellingPrice = targetFoodCostPct > 0 ? totalCostPerPortionExclLabour / (targetFoodCostPct / 100) : 0;
-  const roundedSellingPrice = roundToRule(suggestedNetSellingPrice, toNumber(recipe.roundingRule, 0.25));
-  const vatInclusivePrice = roundedSellingPrice * (1 + Math.max(0, toNumber(recipe.vatRatePercent, 20)) / 100);
-  const deliveryAdjustedRecommendation = roundedSellingPrice / Math.max(0.01, 1 - Math.max(0, toNumber(recipe.deliveryCommissionPercent, 30)) / 100);
-
-  const sellingPrice = Math.max(0, toNumber(recipe.sellingPrice, 0));
-  const manualMenuPrice = recipe.manualMenuPrice === '' ? null : Math.max(0, toNumber(recipe.manualMenuPrice, 0));
-  const effectiveMenuPrice = sellingPrice > 0 ? sellingPrice : (manualMenuPrice ?? roundedSellingPrice);
-  const foodCostPercent = effectiveMenuPrice > 0 ? (totalCostPerPortionExclLabour / effectiveMenuPrice) * 100 : 0;
-  const grossProfitPerPortion = effectiveMenuPrice - totalCostPerPortionExclLabour;
-  const foodCostManualPercent = manualMenuPrice && manualMenuPrice > 0 ? (totalCostPerPortionExclLabour / manualMenuPrice) * 100 : null;
-
-  const unitsSold = Math.max(0, toNumber(recipe.unitsSold, 0));
-  const rawRevenue = effectiveMenuPrice * unitsSold;
-  const revenue = recipe.revenueOverride === '' ? rawRevenue : Math.max(0, toNumber(recipe.revenueOverride, rawRevenue));
-  const totalIngredientCostPeriod = totalCostPerPortionExclLabour * unitsSold;
-  const totalGrossProfit = revenue - totalIngredientCostPeriod;
-
-  return {
-    ...recipe,
-    ingredientRows: computedRows,
-    totalIngredientCost,
-    ingredientCostPerPortion,
-    totalCostPerPortionExclLabour,
-    totalCostPerPortionInclLabour,
-    suggestedNetSellingPrice,
-    roundedSellingPrice,
-    vatInclusivePrice,
-    deliveryAdjustedRecommendation,
-    effectiveMenuPrice,
-    foodCostPercent,
-    foodCostManualPercent,
-    grossProfitPerPortion,
-    contributionPerItemSold: grossProfitPerPortion,
-    unitsSold,
-    revenue,
-    totalIngredientCostPeriod,
-    totalGrossProfit,
-    warnings,
-  };
-}
-
-/* ==============================
-   Menu Engineering Engine
-================================ */
-function classifyMenuItems(recipesWithMetrics) {
-  const activeItems = recipesWithMetrics.filter((r) => r.isActive && Number.isFinite(r.unitsSold) && Number.isFinite(r.grossProfitPerPortion));
-  if (activeItems.length < 2) {
-    return {
-      averages: { unitsSold: 0, grossProfitPerPortion: 0 },
-      items: recipesWithMetrics.map((r) => ({ ...r, classification: 'Unclassified', popularityBand: 'n/a', profitabilityBand: 'n/a' })),
-      fallback: 'Not enough active item data to classify. Add at least 2 active items with units sold and selling price.',
-    };
-  }
-
-  const avgUnits = activeItems.reduce((sum, item) => sum + item.unitsSold, 0) / activeItems.length;
-  const avgGross = activeItems.reduce((sum, item) => sum + item.grossProfitPerPortion, 0) / activeItems.length;
-
-  const items = recipesWithMetrics.map((item) => {
-    if (!item.isActive) return { ...item, classification: 'Inactive', popularityBand: 'n/a', profitabilityBand: 'n/a' };
-    const highPopularity = item.unitsSold >= avgUnits;
-    const highProfitability = item.grossProfitPerPortion >= avgGross;
-    let classification = 'Dog';
-    if (highPopularity && highProfitability) classification = 'Star';
-    else if (highPopularity && !highProfitability) classification = 'Plowhorse';
-    else if (!highPopularity && highProfitability) classification = 'Puzzle';
-    return {
-      ...item,
-      classification,
-      popularityBand: highPopularity ? 'high' : 'low',
-      profitabilityBand: highProfitability ? 'high' : 'low',
-    };
-  });
-
-  return {
-    averages: { unitsSold: avgUnits, grossProfitPerPortion: avgGross },
-    items,
-    fallback: '',
-  };
-}
-
-function getRecommendedAction(item, prefs = state.prefs) {
-  if (!item.isActive) return 'Inactive item. Keep for reference or reactivate.';
-  const foodCostFlag = item.foodCostPercent > prefs.foodCostFlagTarget;
-  if (item.grossProfitPerPortion <= 0) return 'Urgent: negative margin, reprice or redesign immediately.';
-  const avg = state.menuEngine?.averages ?? { unitsSold: 0, grossProfitPerPortion: 0 };
-  const byClass = {
-    Star: 'Keep prominent placement and protect price integrity.',
-    Plowhorse: 'Test a small (£0.25-£0.50) price increase or 5-10% cost reduction.',
-    Puzzle: 'Improve visibility (photo, naming, position) and add a combo/upsell.',
-    Dog: 'Run a 2-week rescue test; if no movement, retire or fully redesign.',
-    Unclassified: 'Collect one full period of sales before deciding.',
-  };
-
-  let text = byClass[item.classification] || 'Review performance and adjust.';
-  if (foodCostFlag && item.unitsSold >= state.prefs.lowUnitsThreshold) text += ' High volume item, so margin optimisation is high impact.';
-  if (item.classification === 'Puzzle' && item.grossProfitPerPortion > avg.grossProfitPerPortion) text += ' It is profitable enough to feature more aggressively.';
-  if (item.classification === 'Star' && item.unitsSold >= avg.unitsSold) text += ' Avoid discounting unless needed for seasonal demand.';
-  return text;
-}
-
-function getItemFlags(item, prefs = state.prefs) {
-  const flags = [];
-  if (!item.isActive) flags.push('Inactive item');
-  if (item.foodCostPercent > prefs.foodCostFlagTarget) flags.push(`Food cost > ${prefs.foodCostFlagTarget}%`);
-  if (item.effectiveMenuPrice < item.roundedSellingPrice) flags.push('Selling price below recommendation');
-  if (item.unitsSold <= prefs.lowUnitsThreshold) flags.push('Low units sold');
-  if (item.grossProfitPerPortion <= 0.15) flags.push('Near-zero or negative margin');
-  if (!Number.isFinite(item.effectiveMenuPrice) || item.effectiveMenuPrice <= 0 || item.unitsSold === null || item.unitsSold === undefined) flags.push('Missing performance data');
-  return flags;
-}
-
-function buildDashboard(items, menuEngine) {
-  const activeItems = items.filter((i) => i.isActive);
-  const classified = activeItems.filter((i) => ['Star', 'Plowhorse', 'Puzzle', 'Dog'].includes(i.classification));
-
-  const totals = {
-    totalActiveItems: activeItems.length,
-    totalUnitsSold: activeItems.reduce((sum, i) => sum + i.unitsSold, 0),
-    totalRevenue: activeItems.reduce((sum, i) => sum + i.revenue, 0),
-    totalGrossProfit: activeItems.reduce((sum, i) => sum + i.totalGrossProfit, 0),
-    avgSellingPrice: activeItems.length ? activeItems.reduce((sum, i) => sum + i.effectiveMenuPrice, 0) / activeItems.length : 0,
-    avgFoodCostPercent: activeItems.length ? activeItems.reduce((sum, i) => sum + i.foodCostPercent, 0) / activeItems.length : 0,
-    avgGrossProfitPerPortion: activeItems.length ? activeItems.reduce((sum, i) => sum + i.grossProfitPerPortion, 0) / activeItems.length : 0,
-    stars: classified.filter((i) => i.classification === 'Star').length,
-    plowhorses: classified.filter((i) => i.classification === 'Plowhorse').length,
-    puzzles: classified.filter((i) => i.classification === 'Puzzle').length,
-    dogs: classified.filter((i) => i.classification === 'Dog').length,
-  };
-
-  const topUnits = [...activeItems].sort((a, b) => b.unitsSold - a.unitsSold).slice(0, 3);
-  const topProfit = [...activeItems].sort((a, b) => b.totalGrossProfit - a.totalGrossProfit).slice(0, 3);
-  const lowMargin = [...activeItems].sort((a, b) => a.grossProfitPerPortion - b.grossProfitPerPortion).slice(0, 3);
-  const highFoodCost = activeItems.filter((i) => i.foodCostPercent > state.prefs.foodCostFlagTarget);
-
-  const flagCounts = {
-    aboveFoodCostTarget: activeItems.filter((i) => i.foodCostPercent > state.prefs.foodCostFlagTarget).length,
-    pricedBelowRecommendation: activeItems.filter((i) => i.effectiveMenuPrice < i.roundedSellingPrice).length,
-    needsReview: activeItems.filter((i) => getItemFlags(i).length > 0).length,
-    missingSalesData: activeItems.filter((i) => i.unitsSold <= 0).length,
-  };
-
-  const insights = [];
-  if (!activeItems.length) insights.push('No active items. Mark items active to start dashboard analysis.');
-  if (totals.dogs > 0) insights.push(`${totals.dogs} Dog item(s) need redesign or removal review.`);
-  if (highFoodCost.length > 0) insights.push(`${highFoodCost.length} item(s) are above food cost target (${state.prefs.foodCostFlagTarget}%).`);
-  if (totals.puzzles > 0) insights.push(`${totals.puzzles} Puzzle item(s) are profitable but under-ordered.`);
-  if (topProfit[0]) insights.push(`Top profit driver: ${topProfit[0].name} (${fmtCurrency(topProfit[0].totalGrossProfit)}).`);
-  if (!insights.length) insights.push('Menu performance is stable. Continue monitoring stars and margins weekly.');
-
-  return { totals, topUnits, topProfit, lowMargin, highFoodCost, flagCounts, insights, averages: menuEngine.averages };
-}
-
-/* ==============================
-   DOM Cache
-================================ */
-const $ = (id) => document.getElementById(id);
 const dom = {
-  recipeList: $('recipe-list'), recipeSearch: $('recipe-search'), recipeCount: $('recipe-count'), recipeStatusFilter: $('recipe-status-filter'),
-  editorErrors: $('editor-errors'), calcWarnings: $('calc-warnings'), ingredientRows: $('ingredient-rows'), template: $('ingredient-row-template'),
-  insightList: $('insight-list'), itemFlagList: $('item-flag-list'), draftState: $('draft-state'),
-  analysisSearch: $('analysis-search'), analysisClassFilter: $('analysis-class-filter'), analysisBody: $('analysis-body'), analysisTable: $('analysis-table'),
-  dashboardCards: $('dashboard-cards'), bulkFlagSummary: $('bulk-flag-summary'), topUnitsList: $('top-units-list'), topProfitList: $('top-profit-list'),
-  menuInsightList: $('menu-insight-list'), matrixChart: $('matrix-chart'), matrixFallback: $('matrix-fallback'), periodLabel: $('period-label'),
+  recipeList: $('recipe-list'), recipeCount: $('recipe-count'), recipeSearch: $('recipe-search'), recipeStatusFilter: $('recipe-status-filter'),
+  ingredientRows: $('ingredient-rows'), template: $('ingredient-row-template'),
+  editorErrors: $('editor-errors'), calcWarnings: $('calc-warnings'), draftState: $('draft-state'),
+  insightList: $('insight-list'), itemFlagList: $('item-flag-list'), periodLabel: $('period-label'), modeIndicator: $('mode-indicator'),
+  analysisSearch: $('analysis-search'), analysisClassFilter: $('analysis-class-filter'), analysisTable: $('analysis-table'), analysisBody: $('analysis-body'),
+  dashboardCards: $('dashboard-cards'), menuInsightList: $('menu-insight-list'), priorityList: $('priority-list'), snapshotList: $('snapshot-list'), comparisonSummary: $('comparison-summary'),
+  matrixChart: $('matrix-chart'), matrixFallback: $('matrix-fallback'),
+  compareSearch: $('compare-search'), compareMovementFilter: $('compare-movement-filter'), comparisonTable: $('comparison-table'), comparisonBody: $('comparison-body'),
+  snapshotName: $('snapshot-name'), snapshotPeriod: $('snapshot-period'), snapshotNotes: $('snapshot-notes'), snapshotFeedback: $('snapshot-feedback'),
+  compareLeft: $('compare-left'), compareRight: $('compare-right'), comparisonNotes: $('comparison-notes'),
+  actions: {
+    openLib: $('open-library-btn'), closeLib: $('close-library-btn'), newRecipe: $('new-recipe-btn'), addRow: $('add-row-btn'),
+    save: $('save-recipe-btn'), update: $('update-recipe-btn'), duplicate: $('duplicate-recipe-btn'), del: $('delete-recipe-btn'), reset: $('reset-form-btn'),
+    createSnapshot: $('create-snapshot-btn'), runCompare: $('run-compare-btn'), clearCompare: $('clear-compare-btn'),
+    exportCurrentCsv: $('export-current-csv-btn'), exportCompareCsv: $('export-compare-csv-btn'), printSummary: $('print-summary-btn'), copySummary: $('copy-summary-btn'),
+  },
   results: {
-    totalIngredient: $('res-total-ingredient'), ingredientPortion: $('res-ingredient-portion'), totalPortion: $('res-total-portion'),
-    totalLabour: $('res-total-labour'), suggestedNet: $('res-suggested-net'), rounded: $('res-rounded'), vat: $('res-vat'), delivery: $('res-delivery'),
-    gross: $('res-gross'), foodRounded: $('res-food-rounded'), totalRevenue: $('res-total-revenue'), totalGrossProfit: $('res-total-gross-profit'),
-    classification: $('res-classification'), action: $('res-action'),
+    totalIngredient: $('res-total-ingredient'), totalPortion: $('res-total-portion'), rounded: $('res-rounded'), gross: $('res-gross'), foodRounded: $('res-food-rounded'),
+    totalRevenue: $('res-total-revenue'), totalGrossProfit: $('res-total-gross-profit'), classification: $('res-classification'), action: $('res-action'),
   },
   fields: {
-    name: $('recipe-name'), category: $('recipe-category'), portions: $('portions-yielded'), packaging: $('packaging-cost'), labour: $('labour-cost'),
-    target: $('target-food-cost'), vat: $('vat-rate'), delivery: $('delivery-commission'), rounding: $('rounding-rule'), manual: $('manual-price'),
-    sellingPrice: $('selling-price'), unitsSold: $('units-sold'), reportingPeriod: $('reporting-period'), internalScore: $('internal-score'),
-    isActive: $('is-active'), itemNotes: $('item-notes'), revenueOverride: $('revenue-override'),
-  },
-  actions: {
-    newRecipe: $('new-recipe-btn'), save: $('save-recipe-btn'), update: $('update-recipe-btn'), duplicate: $('duplicate-recipe-btn'),
-    del: $('delete-recipe-btn'), reset: $('reset-form-btn'), addRow: $('add-row-btn'), openLib: $('open-library-btn'), closeLib: $('close-library-btn'),
+    name: $('recipe-name'), category: $('recipe-category'), portions: $('portions-yielded'), target: $('target-food-cost'), packaging: $('packaging-cost'), labour: $('labour-cost'),
+    vat: $('vat-rate'), delivery: $('delivery-commission'), rounding: $('rounding-rule'), manual: $('manual-price'), sellingPrice: $('selling-price'), unitsSold: $('units-sold'),
+    reportingPeriod: $('reporting-period'), internalScore: $('internal-score'), isActive: $('is-active'), revenueOverride: $('revenue-override'), itemNotes: $('item-notes'),
   },
   library: {
-    modal: $('library-modal'), errors: $('library-errors'), count: $('ingredient-count'), search: $('ingredient-search'), body: $('ingredient-library-body'),
+    modal: $('library-modal'), errors: $('library-errors'), count: $('ingredient-count'), body: $('ingredient-library-body'), search: $('ingredient-search'),
     name: $('lib-name'), price: $('lib-price'), packSize: $('lib-pack-size'), packUnit: $('lib-pack-unit'), supplier: $('lib-supplier'), notes: $('lib-notes'),
     add: $('add-ingredient-btn'), update: $('update-ingredient-btn'), clear: $('clear-ingredient-form-btn'),
   },
 };
 
-/* ==============================
-   Validation
-================================ */
-function validateRecipe(recipe) {
-  const errors = [];
-  if (!recipe.name) errors.push('Recipe name is required.');
-  if (!(recipe.portionsYielded > 0)) errors.push('Portions yielded must be greater than 0.');
-  if (!(recipe.targetFoodCostPercent > 0 && recipe.targetFoodCostPercent < 100)) errors.push('Target food cost must be between 0 and 100.');
-  if (recipe.sellingPrice < 0) errors.push('Selling price must be 0 or greater.');
-  if (recipe.unitsSold < 0) errors.push('Units sold must be 0 or greater.');
-  return errors;
-}
+function setInlineMessage(el, message, type = 'warn') { el.textContent = message || ''; el.classList.toggle('success', type === 'success'); }
+function safeParse(raw, fallback) { try { const v = JSON.parse(raw); return v ?? fallback; } catch { return fallback; } }
+function getStoredArray(k) { const v = safeParse(localStorage.getItem(k), []); return Array.isArray(v) ? v : []; }
+function getStoredObject(k, f = {}) { const v = safeParse(localStorage.getItem(k), f); return v && typeof v === 'object' ? v : f; }
+function setStored(k, v) { localStorage.setItem(k, JSON.stringify(v)); }
 
-function clearValidationState() {
-  Object.values(dom.fields).forEach((el) => el.classList.remove('is-invalid'));
-}
-
-function markValidation(recipe) {
-  clearValidationState();
-  if (!recipe.name) dom.fields.name.classList.add('is-invalid');
-  if (!(recipe.portionsYielded > 0)) dom.fields.portions.classList.add('is-invalid');
-  if (!(recipe.targetFoodCostPercent > 0 && recipe.targetFoodCostPercent < 100)) dom.fields.target.classList.add('is-invalid');
-  if (recipe.sellingPrice < 0) dom.fields.sellingPrice.classList.add('is-invalid');
-  if (recipe.unitsSold < 0) dom.fields.unitsSold.classList.add('is-invalid');
-}
-
-function validateIngredientInput(input, editingId = null) {
-  const errors = [];
-  if (!input.name) errors.push('Ingredient name is required.');
-  if (input.purchasePrice < 0) errors.push('Purchase price must be 0 or greater.');
-  if (!(input.packSize > 0)) errors.push('Pack size must be greater than 0.');
-  if (!PACK_UNITS.includes(input.packUnit)) errors.push('Pack unit is required.');
-  const duplicate = state.ingredients.some((ing) => safeLower(ing.name) === safeLower(input.name) && ing.id !== editingId);
-  if (duplicate) errors.push('An ingredient with this name already exists.');
-  return errors;
-}
-
-/* ==============================
-   Form and Row Helpers
-================================ */
-function readRowsFromDom() {
-  const rows = [...dom.ingredientRows.querySelectorAll('tr')].map((tr) => {
-    const q = (s) => tr.querySelector(s);
-    return migrateIngredientRow({
-      rowId: tr.dataset.rowId,
-      ingredientId: q('.row-lib-select').value,
-      ingredientNameSnapshot: q('.row-name').value,
-      purchasePriceSnapshot: q('.row-price').value,
-      packSizeSnapshot: q('.row-pack-size').value,
-      packUnitSnapshot: q('.row-pack-unit').value,
-      amountUsed: q('.row-amount').value,
-      useUnit: q('.row-use-unit').value,
-      calculatedCostUsed: toNumber(q('.row-cost').dataset.cost, 0),
-    });
-  });
-  return rows.length ? rows : [defaultIngredientRow()];
-}
-
-function readRecipeFromForm() {
-  const raw = {
-    id: state.activeRecipeId,
-    name: cleanText(dom.fields.name.value),
-    category: cleanText(dom.fields.category.value),
-    portionsYielded: toNumber(dom.fields.portions.value, 0),
-    packagingCostPerPortion: toNumber(dom.fields.packaging.value, 0),
-    labourCostPerPortion: toNumber(dom.fields.labour.value, 0),
-    targetFoodCostPercent: toNumber(dom.fields.target.value, 0),
-    vatRatePercent: toNumber(dom.fields.vat.value, 0),
-    deliveryCommissionPercent: toNumber(dom.fields.delivery.value, 0),
-    roundingRule: toNumber(dom.fields.rounding.value, 0.25),
-    manualMenuPrice: dom.fields.manual.value === '' ? '' : toNumber(dom.fields.manual.value, 0),
-    sellingPrice: toNumber(dom.fields.sellingPrice.value, 0),
-    unitsSold: Math.max(0, Math.round(toNumber(dom.fields.unitsSold.value, 0))),
-    reportingPeriod: cleanText(dom.fields.reportingPeriod.value || 'Last 30 Days'),
-    internalScore: dom.fields.internalScore.value === '' ? '' : clamp(toNumber(dom.fields.internalScore.value, 0), 0, 10),
-    isActive: dom.fields.isActive.value === 'true',
-    itemNotes: cleanText(dom.fields.itemNotes.value),
-    revenueOverride: dom.fields.revenueOverride.value === '' ? '' : toNumber(dom.fields.revenueOverride.value, 0),
-    ingredientRows: readRowsFromDom(),
+function defaultIngredientRow() { return { rowId: uid('row'), ingredientId: '', ingredientNameSnapshot: '', purchasePriceSnapshot: 0, packSizeSnapshot: 1, packUnitSnapshot: 'g', amountUsed: 0, useUnit: 'g', calculatedCostUsed: 0 }; }
+function defaultRecipe() {
+  return {
+    id: null, name: '', category: '', portionsYielded: 10, packagingCostPerPortion: 0, labourCostPerPortion: 0,
+    targetFoodCostPercent: 30, vatRatePercent: 20, deliveryCommissionPercent: 30, roundingRule: 0.25, manualMenuPrice: '',
+    ingredientRows: [defaultIngredientRow()], sellingPrice: 0, unitsSold: 0, reportingPeriod: 'Last 30 Days', internalScore: '', isActive: true,
+    revenueOverride: '', itemNotes: '', createdAt: null, updatedAt: null, storageVersion: STORAGE_VERSION,
   };
-  return migrateRecipe(raw);
+}
+function convertUnit(value, fromUnit, toUnit) {
+  if (!fromUnit || !toUnit || UNIT_GROUP[fromUnit] !== UNIT_GROUP[toUnit]) return { ok: false, value: 0 };
+  return { ok: true, value: (value * BASE_FACTOR[fromUnit]) / BASE_FACTOR[toUnit] };
 }
 
-function setRecipeToForm(recipe) {
-  dom.fields.name.value = recipe.name;
-  dom.fields.category.value = recipe.category;
-  dom.fields.portions.value = recipe.portionsYielded;
-  dom.fields.packaging.value = recipe.packagingCostPerPortion;
-  dom.fields.labour.value = recipe.labourCostPerPortion;
-  dom.fields.target.value = recipe.targetFoodCostPercent;
-  dom.fields.vat.value = recipe.vatRatePercent;
-  dom.fields.delivery.value = recipe.deliveryCommissionPercent;
-  dom.fields.rounding.value = String(recipe.roundingRule);
-  dom.fields.manual.value = recipe.manualMenuPrice === '' ? '' : recipe.manualMenuPrice;
-  dom.fields.sellingPrice.value = recipe.sellingPrice;
-  dom.fields.unitsSold.value = recipe.unitsSold;
-  dom.fields.reportingPeriod.value = recipe.reportingPeriod;
-  dom.fields.internalScore.value = recipe.internalScore === '' ? '' : recipe.internalScore;
-  dom.fields.isActive.value = String(recipe.isActive);
-  dom.fields.itemNotes.value = recipe.itemNotes;
-  dom.fields.revenueOverride.value = recipe.revenueOverride === '' ? '' : recipe.revenueOverride;
-
-  dom.ingredientRows.innerHTML = '';
-  (recipe.ingredientRows?.length ? recipe.ingredientRows : [defaultIngredientRow()]).forEach(addRowToDom);
-  recalcAndRender();
+function migrateIngredient(raw) {
+  return { id: cleanText(raw?.id) || uid('ing'), name: cleanText(raw?.name), purchasePrice: Math.max(0, toNumber(raw?.purchasePrice)), packSize: Math.max(0.0001, toNumber(raw?.packSize, 1)), packUnit: PACK_UNITS.includes(raw?.packUnit) ? raw.packUnit : 'g', supplier: cleanText(raw?.supplier), notes: cleanText(raw?.notes) };
+}
+function migrateRow(raw) {
+  return { rowId: cleanText(raw?.rowId) || uid('row'), ingredientId: cleanText(raw?.ingredientId), ingredientNameSnapshot: cleanText(raw?.ingredientNameSnapshot ?? raw?.name), purchasePriceSnapshot: Math.max(0, toNumber(raw?.purchasePriceSnapshot ?? raw?.purchasePrice)), packSizeSnapshot: Math.max(0.0001, toNumber(raw?.packSizeSnapshot ?? raw?.packSize, 1)), packUnitSnapshot: PACK_UNITS.includes(raw?.packUnitSnapshot ?? raw?.packUnit) ? (raw?.packUnitSnapshot ?? raw?.packUnit) : 'g', amountUsed: Math.max(0, toNumber(raw?.amountUsed)), useUnit: PACK_UNITS.includes(raw?.useUnit) ? raw.useUnit : 'g', calculatedCostUsed: Math.max(0, toNumber(raw?.calculatedCostUsed)) };
+}
+function migrateRecipe(raw) {
+  const seeded = { ...defaultRecipe(), ...raw };
+  return {
+    ...seeded, id: cleanText(raw?.id) || uid('rec'), name: cleanText(raw?.name), category: cleanText(raw?.category),
+    portionsYielded: Math.max(0.01, toNumber(raw?.portionsYielded ?? raw?.servings, 10)),
+    packagingCostPerPortion: Math.max(0, toNumber(raw?.packagingCostPerPortion ?? raw?.packagingCost)), labourCostPerPortion: Math.max(0, toNumber(raw?.labourCostPerPortion ?? raw?.laborCostPerPortion ?? raw?.labourCost)),
+    targetFoodCostPercent: clamp(toNumber(raw?.targetFoodCostPercent ?? raw?.targetFoodCost, 30), 0.01, 99.99), vatRatePercent: Math.max(0, toNumber(raw?.vatRatePercent, 20)),
+    deliveryCommissionPercent: Math.max(0, toNumber(raw?.deliveryCommissionPercent, 30)), roundingRule: toNumber(raw?.roundingRule, 0.25) || 0.25,
+    manualMenuPrice: raw?.manualMenuPrice === '' ? '' : Math.max(0, toNumber(raw?.manualMenuPrice ?? raw?.menuPrice, 0)),
+    sellingPrice: Math.max(0, toNumber(raw?.sellingPrice ?? raw?.currentSellingPrice ?? raw?.priceSoldAt, 0)), unitsSold: Math.max(0, Math.round(toNumber(raw?.unitsSold ?? raw?.salesUnits ?? raw?.qtySold, 0))),
+    reportingPeriod: cleanText(raw?.reportingPeriod || 'Last 30 Days'), internalScore: raw?.internalScore === '' ? '' : clamp(toNumber(raw?.internalScore, 0), 0, 10),
+    isActive: typeof raw?.isActive === 'boolean' ? raw.isActive : true, revenueOverride: raw?.revenueOverride === '' ? '' : toNumber(raw?.revenueOverride, 0), itemNotes: cleanText(raw?.itemNotes),
+    ingredientRows: Array.isArray(raw?.ingredientRows) && raw.ingredientRows.length ? raw.ingredientRows.map(migrateRow) : [defaultIngredientRow()], createdAt: cleanText(raw?.createdAt) || nowIso(), updatedAt: cleanText(raw?.updatedAt) || nowIso(), storageVersion: STORAGE_VERSION,
+  };
 }
 
-function addRowToDom(rowData = defaultIngredientRow()) {
-  const fragment = dom.template.content.cloneNode(true);
-  const tr = fragment.querySelector('tr');
-  tr.dataset.rowId = rowData.rowId || uid('row');
-
-  const select = tr.querySelector('.row-lib-select');
-  select.innerHTML = '<option value="">Manual / Snapshot</option>';
-  state.ingredients.forEach((ing) => {
-    const opt = document.createElement('option');
-    opt.value = ing.id;
-    opt.textContent = ing.name;
-    select.appendChild(opt);
+function calculateRowCost(row) {
+  const c = convertUnit(Math.max(0, toNumber(row.amountUsed)), row.useUnit, row.packUnitSnapshot);
+  if (!c.ok) return { cost: 0, warning: `Cannot convert ${row.useUnit} to ${row.packUnitSnapshot}` };
+  return { cost: (Math.max(0, toNumber(row.purchasePriceSnapshot)) / Math.max(0.0001, toNumber(row.packSizeSnapshot, 1))) * c.value, warning: '' };
+}
+function roundToRule(value, rule = 0.25) { return value > 0 ? Math.round(value / rule) * rule : 0; }
+function calculateRecipeMetrics(recipe, options = {}) {
+  const warnings = []; let totalIngredientCost = 0;
+  const ingredientRows = (recipe.ingredientRows || []).map((r) => {
+    const calc = calculateRowCost(r); totalIngredientCost += calc.cost; if (calc.warning && !options.suppressWarnings) warnings.push(calc.warning); return { ...r, calculatedCostUsed: calc.cost };
   });
-
-  const nameInput = tr.querySelector('.row-name');
-  const priceInput = tr.querySelector('.row-price');
-  const sizeInput = tr.querySelector('.row-pack-size');
-  const packUnit = tr.querySelector('.row-pack-unit');
-  const amountInput = tr.querySelector('.row-amount');
-  const useUnit = tr.querySelector('.row-use-unit');
-  const costSpan = tr.querySelector('.row-cost');
-
-  select.value = rowData.ingredientId || '';
-  nameInput.value = rowData.ingredientNameSnapshot || '';
-  priceInput.value = rowData.purchasePriceSnapshot;
-  sizeInput.value = rowData.packSizeSnapshot;
-  packUnit.value = rowData.packUnitSnapshot;
-  amountInput.value = rowData.amountUsed;
-  useUnit.value = rowData.useUnit;
-
-  select.addEventListener('change', () => {
-    const ing = state.ingredients.find((x) => x.id === select.value);
-    if (ing) {
-      nameInput.value = ing.name;
-      priceInput.value = ing.purchasePrice;
-      sizeInput.value = ing.packSize;
-      packUnit.value = ing.packUnit;
-      useUnit.value = ing.packUnit;
-    }
-    recalcAndRender();
-  });
-
-  [nameInput, priceInput, sizeInput, packUnit, amountInput, useUnit].forEach((el) => {
-    el.addEventListener('input', recalcAndRender);
-    el.addEventListener('change', recalcAndRender);
-  });
-
-  tr.querySelector('.row-remove').addEventListener('click', () => {
-    tr.remove();
-    if (!dom.ingredientRows.querySelector('tr')) addRowToDom(defaultIngredientRow());
-    recalcAndRender();
-  });
-
-  dom.ingredientRows.appendChild(fragment);
-  const calc = calculateRowCost(migrateIngredientRow({
-    purchasePriceSnapshot: priceInput.value,
-    packSizeSnapshot: sizeInput.value,
-    packUnitSnapshot: packUnit.value,
-    amountUsed: amountInput.value,
-    useUnit: useUnit.value,
-  }));
-  costSpan.dataset.cost = String(calc.cost);
-  costSpan.textContent = fmtCurrency(calc.cost);
+  const portions = Math.max(0.01, toNumber(recipe.portionsYielded, 10));
+  const ingredientCostPerPortion = totalIngredientCost / portions;
+  const totalCostPerPortionExclLabour = ingredientCostPerPortion + Math.max(0, toNumber(recipe.packagingCostPerPortion));
+  const totalCostPerPortionInclLabour = totalCostPerPortionExclLabour + Math.max(0, toNumber(recipe.labourCostPerPortion));
+  const suggestedNetSellingPrice = totalCostPerPortionExclLabour / (Math.max(0.01, toNumber(recipe.targetFoodCostPercent, 30)) / 100);
+  const roundedSellingPrice = roundToRule(suggestedNetSellingPrice, toNumber(recipe.roundingRule, 0.25));
+  const effectiveMenuPrice = Math.max(0, toNumber(recipe.sellingPrice, 0)) || (recipe.manualMenuPrice === '' ? roundedSellingPrice : Math.max(0, toNumber(recipe.manualMenuPrice, roundedSellingPrice)));
+  const foodCostPercent = effectiveMenuPrice > 0 ? (totalCostPerPortionExclLabour / effectiveMenuPrice) * 100 : 0;
+  const grossProfitPerPortion = effectiveMenuPrice - totalCostPerPortionExclLabour;
+  const unitsSold = Math.max(0, toNumber(recipe.unitsSold, 0));
+  const computedRevenue = effectiveMenuPrice * unitsSold;
+  const revenue = recipe.revenueOverride === '' ? computedRevenue : Math.max(0, toNumber(recipe.revenueOverride, computedRevenue));
+  const totalGrossProfit = revenue - (totalCostPerPortionExclLabour * unitsSold);
+  return { ...recipe, ingredientRows, totalIngredientCost, ingredientCostPerPortion, totalCostPerPortionExclLabour, totalCostPerPortionInclLabour, suggestedNetSellingPrice, roundedSellingPrice, effectiveMenuPrice, foodCostPercent, grossProfitPerPortion, unitsSold, revenue, totalGrossProfit, warnings };
 }
 
-function resetRecipeForm() {
-  state.activeRecipeId = null;
-  clearValidationState();
-  setRecipeToForm(defaultRecipe());
-  setInlineMessage(dom.editorErrors, '', 'warn');
+function classifyMenuItems(items) {
+  const active = items.filter((i) => i.isActive);
+  if (active.length < 2) return { items: items.map((i) => ({ ...i, classification: i.isActive ? 'Unclassified' : 'Inactive' })), averages: { unitsSold: 0, grossProfitPerPortion: 0 }, fallback: 'Need at least 2 active items for classification.' };
+  const avgUnits = active.reduce((s, i) => s + i.unitsSold, 0) / active.length;
+  const avgGross = active.reduce((s, i) => s + i.grossProfitPerPortion, 0) / active.length;
+  return {
+    averages: { unitsSold: avgUnits, grossProfitPerPortion: avgGross }, fallback: '',
+    items: items.map((i) => {
+      if (!i.isActive) return { ...i, classification: 'Inactive' };
+      const hp = i.unitsSold >= avgUnits; const hgp = i.grossProfitPerPortion >= avgGross;
+      const c = hp && hgp ? 'Star' : hp ? 'Plowhorse' : hgp ? 'Puzzle' : 'Dog';
+      return { ...i, classification: c };
+    }),
+  };
 }
 
-/* ==============================
-   Persistence
-================================ */
-function persistAll() {
-  setStored(STORAGE_KEYS.ingredients, state.ingredients);
-  setStored(STORAGE_KEYS.recipes, state.recipes);
-  setStored(STORAGE_KEYS.prefs, state.prefs);
+function getItemFlags(item) {
+  const f = [];
+  if (item.foodCostPercent > state.prefs.foodCostFlagTarget) f.push('Food cost above target');
+  if (item.effectiveMenuPrice < item.roundedSellingPrice) f.push('Priced below recommendation');
+  if (item.unitsSold > state.prefs.lowUnitsThreshold && item.grossProfitPerPortion < 1.5) f.push('High sales, weak margin');
+  if (item.unitsSold <= state.prefs.lowUnitsThreshold && item.grossProfitPerPortion >= 2) f.push('Low sales, strong profit');
+  if (item.classification === 'Dog') f.push('Dog classification');
+  if (item.grossProfitPerPortion <= 0.15) f.push('Negative/near-zero margin');
+  if (!item.isActive) f.push('Inactive item');
+  return f;
+}
+function recommendedAction(item) {
+  if (item.grossProfitPerPortion <= 0.15) return 'Review recipe cost and reprice urgently';
+  if (item.foodCostPercent > state.prefs.foodCostFlagTarget) return 'Raise price carefully or reduce ingredient cost';
+  if (item.classification === 'Puzzle') return 'Improve menu placement and promotion';
+  if (item.classification === 'Plowhorse') return 'Test small price lift (0.25-0.50)';
+  if (item.classification === 'Dog') return 'Consider redesign or removal after test';
+  return 'Maintain positioning and monitor';
 }
 
-function persistDraft() {
-  const recipe = readRecipeFromForm();
-  recipe.updatedAt = nowIso();
-  state.draft = recipe;
-  setStored(STORAGE_KEYS.draft, recipe);
-  dom.draftState.textContent = `Draft autosaved ${new Date().toLocaleTimeString()}`;
+function totalsFromItems(items) {
+  const active = items.filter((i) => i.isActive);
+  return {
+    activeItems: active.length, totalUnits: active.reduce((s, i) => s + i.unitsSold, 0), totalRevenue: active.reduce((s, i) => s + i.revenue, 0),
+    totalGrossProfit: active.reduce((s, i) => s + i.totalGrossProfit, 0), avgSellingPrice: active.length ? active.reduce((s, i) => s + i.effectiveMenuPrice, 0) / active.length : 0,
+    avgGrossProfitPerPortion: active.length ? active.reduce((s, i) => s + i.grossProfitPerPortion, 0) / active.length : 0,
+    avgFoodCostPercent: active.length ? active.reduce((s, i) => s + i.foodCostPercent, 0) / active.length : 0,
+    stars: active.filter((i) => i.classification === 'Star').length, plowhorses: active.filter((i) => i.classification === 'Plowhorse').length,
+    puzzles: active.filter((i) => i.classification === 'Puzzle').length, dogs: active.filter((i) => i.classification === 'Dog').length,
+  };
+}
+
+function snapshotFromItems(name, periodLabel, notes, sourceLabel = 'live') {
+  const metrics = state.recipes.map((r) => calculateRecipeMetrics(r, { suppressWarnings: true }));
+  const classified = classifyMenuItems(metrics).items.map((i) => ({ ...i, flags: getItemFlags(i), action: recommendedAction(i) }));
+  return { id: uid('snap'), name, periodLabel: periodLabel || 'Unspecified', notes: notes || '', sourceLabel, createdAt: nowIso(), totals: totalsFromItems(classified), items: structuredClone(classified) };
+}
+
+function comparePeriods(leftItems, rightItems) {
+  const lmap = new Map(leftItems.map((i) => [safeLower(i.name), i]));
+  const rmap = new Map(rightItems.map((i) => [safeLower(i.name), i]));
+  const keys = [...new Set([...lmap.keys(), ...rmap.keys()])];
+  const rows = keys.map((k) => {
+    const oldI = lmap.get(k); const newI = rmap.get(k);
+    const base = oldI || { name: newI.name, classification: 'Missing', effectiveMenuPrice: 0, unitsSold: 0, revenue: 0, totalGrossProfit: 0, foodCostPercent: 0 };
+    const curr = newI || { name: oldI.name, classification: 'Missing', effectiveMenuPrice: 0, unitsSold: 0, revenue: 0, totalGrossProfit: 0, foodCostPercent: 0 };
+    const priceChange = curr.effectiveMenuPrice - base.effectiveMenuPrice;
+    const unitsChange = curr.unitsSold - base.unitsSold;
+    const revenueChange = curr.revenue - base.revenue;
+    const profitChange = curr.totalGrossProfit - base.totalGrossProfit;
+    const foodCostChange = curr.foodCostPercent - base.foodCostPercent;
+    const improved = revenueChange > 0 && profitChange > 0;
+    const worsened = revenueChange < 0 || profitChange < 0;
+    const movement = base.classification === curr.classification ? '→' : `${base.classification} → ${curr.classification}`;
+    const severity = curr.grossProfitPerPortion <= 0.15 || curr.classification === 'Dog' || profitChange < 0 ? 'High' : worsened ? 'Medium' : 'Low';
+    return { name: curr.name || base.name, oldClassification: base.classification, newClassification: curr.classification, priceChange, unitsChange, revenueChange, profitChange, foodCostChange, improved, worsened, movement, severity, action: recommendedAction(curr), old: base, new: curr };
+  });
+  const leftTotals = totalsFromItems(leftItems); const rightTotals = totalsFromItems(rightItems);
+  const pct = (nv, ov) => ov === 0 ? null : ((nv - ov) / ov) * 100;
+  return {
+    rows,
+    summary: {
+      revenueDelta: rightTotals.totalRevenue - leftTotals.totalRevenue, revenuePct: pct(rightTotals.totalRevenue, leftTotals.totalRevenue),
+      grossProfitDelta: rightTotals.totalGrossProfit - leftTotals.totalGrossProfit, grossProfitPct: pct(rightTotals.totalGrossProfit, leftTotals.totalGrossProfit),
+      unitsDelta: rightTotals.totalUnits - leftTotals.totalUnits, unitsPct: pct(rightTotals.totalUnits, leftTotals.totalUnits),
+      foodCostDelta: rightTotals.avgFoodCostPercent - leftTotals.avgFoodCostPercent,
+      gpPerPortionDelta: rightTotals.avgGrossProfitPerPortion - leftTotals.avgGrossProfitPerPortion,
+      starsDelta: rightTotals.stars - leftTotals.stars, changedClasses: rows.filter((r) => r.oldClassification !== r.newClassification).length,
+      improved: rows.filter((r) => r.improved).length, worsened: rows.filter((r) => r.worsened).length,
+    },
+  };
+}
+
+function persistAll() { setStored(STORAGE_KEYS.ingredients, state.ingredients); setStored(STORAGE_KEYS.recipes, state.recipes); setStored(STORAGE_KEYS.snapshots, state.snapshots); setStored(STORAGE_KEYS.prefs, state.prefs); }
+function persistDraft() { const r = readRecipeFromForm(); r.updatedAt = nowIso(); state.draft = r; setStored(STORAGE_KEYS.draft, r); dom.draftState.textContent = `Draft autosaved ${new Date().toLocaleTimeString()}`; }
+
+function sampleIngredients() {
+  return [
+    { id: uid('ing'), name: 'Baguette', purchasePrice: 8.4, packSize: 12, packUnit: 'unit', supplier: 'Metro Bakery', notes: '' },
+    { id: uid('ing'), name: 'Chicken Thigh', purchasePrice: 24, packSize: 5, packUnit: 'kg', supplier: 'Kiju Butchery', notes: '' },
+    { id: uid('ing'), name: 'Tofu', purchasePrice: 9.8, packSize: 2, packUnit: 'kg', supplier: 'Tofu House', notes: '' },
+    { id: uid('ing'), name: 'Wings', purchasePrice: 18, packSize: 5, packUnit: 'kg', supplier: 'Kiju Butchery', notes: '' },
+    { id: uid('ing'), name: 'Pickled Carrot', purchasePrice: 3.9, packSize: 1, packUnit: 'kg', supplier: '', notes: '' },
+    { id: uid('ing'), name: 'Daikon', purchasePrice: 2.8, packSize: 1, packUnit: 'kg', supplier: '', notes: '' },
+    { id: uid('ing'), name: 'Cucumber', purchasePrice: 5.5, packSize: 10, packUnit: 'unit', supplier: '', notes: '' },
+    { id: uid('ing'), name: 'Soy Glaze', purchasePrice: 5.8, packSize: 1, packUnit: 'l', supplier: '', notes: '' },
+    { id: uid('ing'), name: 'Takeaway Bowl', purchasePrice: 12, packSize: 100, packUnit: 'unit', supplier: '', notes: '' },
+  ];
+}
+function rowByName(ingredients, name, amountUsed, useUnit) {
+  const ing = ingredients.find((i) => safeLower(i.name) === safeLower(name));
+  return migrateRow({ ingredientId: ing?.id, ingredientNameSnapshot: ing?.name ?? name, purchasePriceSnapshot: ing?.purchasePrice, packSizeSnapshot: ing?.packSize, packUnitSnapshot: ing?.packUnit ?? useUnit, amountUsed, useUnit });
+}
+function sampleRecipes(ingredients) {
+  const base = [
+    { name: 'Chicken Banh Mi', category: 'Sandwich', portionsYielded: 10, targetFoodCostPercent: 28, packagingCostPerPortion: 0.32, labourCostPerPortion: 0.6, manualMenuPrice: 8.5, sellingPrice: 8.5, unitsSold: 320, ingredientRows: [rowByName(ingredients, 'Baguette', 10, 'unit'), rowByName(ingredients, 'Chicken Thigh', 1600, 'g'), rowByName(ingredients, 'Pickled Carrot', 300, 'g'), rowByName(ingredients, 'Daikon', 200, 'g')] },
+    { name: 'Tofu Bowl', category: 'Bowl', portionsYielded: 8, targetFoodCostPercent: 29, packagingCostPerPortion: 0.42, labourCostPerPortion: 0.7, manualMenuPrice: 9.95, sellingPrice: 9.95, unitsSold: 75, ingredientRows: [rowByName(ingredients, 'Tofu', 1500, 'g'), rowByName(ingredients, 'Cucumber', 3, 'unit'), rowByName(ingredients, 'Pickled Carrot', 220, 'g'), rowByName(ingredients, 'Takeaway Bowl', 8, 'unit')] },
+    { name: 'Chicken Bowl', category: 'Bowl', portionsYielded: 8, targetFoodCostPercent: 30, packagingCostPerPortion: 0.42, labourCostPerPortion: 0.8, manualMenuPrice: 10.5, sellingPrice: 10.5, unitsSold: 260, ingredientRows: [rowByName(ingredients, 'Chicken Thigh', 1600, 'g'), rowByName(ingredients, 'Cucumber', 4, 'unit'), rowByName(ingredients, 'Pickled Carrot', 220, 'g'), rowByName(ingredients, 'Takeaway Bowl', 8, 'unit')] },
+    { name: 'Wings', category: 'Sides', portionsYielded: 10, targetFoodCostPercent: 27, packagingCostPerPortion: 0.22, labourCostPerPortion: 0.45, manualMenuPrice: 7.75, sellingPrice: 7.75, unitsSold: 95, ingredientRows: [rowByName(ingredients, 'Wings', 1800, 'g'), rowByName(ingredients, 'Soy Glaze', 120, 'ml')] },
+  ];
+  return base.map((r) => migrateRecipe({ ...defaultRecipe(), ...r, id: uid('rec'), createdAt: nowIso(), updatedAt: nowIso() }));
+}
+function seedSnapshots() {
+  const live = state.recipes.map((r) => calculateRecipeMetrics(r, { suppressWarnings: true }));
+  const classed = classifyMenuItems(live).items;
+  const old = classed.map((i) => {
+    const mult = i.name.includes('Chicken Banh') ? 0.88 : i.name.includes('Tofu') ? 0.75 : i.name.includes('Wings') ? 1.08 : 0.93;
+    const oldUnits = Math.max(0, Math.round(i.unitsSold * mult));
+    const oldPrice = i.name.includes('Chicken Banh') ? i.effectiveMenuPrice - 0.25 : i.effectiveMenuPrice;
+    const revenue = oldUnits * oldPrice;
+    const gp = revenue - oldUnits * i.totalCostPerPortionExclLabour;
+    return { ...i, unitsSold: oldUnits, effectiveMenuPrice: oldPrice, revenue, totalGrossProfit: gp };
+  });
+  const oldClassed = classifyMenuItems(old).items;
+  return [
+    { id: uid('snap'), name: 'Last 30 Days', periodLabel: 'Mar 2026', createdAt: nowIso(), notes: 'Before menu pricing tweaks', totals: totalsFromItems(oldClassed), items: oldClassed },
+    { id: uid('snap'), name: 'Current Month', periodLabel: 'Apr 2026', createdAt: nowIso(), notes: 'Post pricing and promo changes', totals: totalsFromItems(classed), items: classed },
+  ];
 }
 
 function loadData() {
-  const currentIngredients = getStoredArray(STORAGE_KEYS.ingredients);
-  const currentRecipes = getStoredArray(STORAGE_KEYS.recipes);
-
-  let ingredients = currentIngredients;
-  let recipes = currentRecipes;
-
-  if (!ingredients.length && !recipes.length) {
-    const legacyIngredients = getStoredArray(STORAGE_KEYS.legacyIngredients);
-    const legacyRecipes = getStoredArray(STORAGE_KEYS.legacyRecipes);
-    if (legacyIngredients.length || legacyRecipes.length) {
-      ingredients = legacyIngredients;
-      recipes = legacyRecipes;
-    }
-  }
-
+  let ingredients = getStoredArray(STORAGE_KEYS.ingredients); let recipes = getStoredArray(STORAGE_KEYS.recipes); let snapshots = getStoredArray(STORAGE_KEYS.snapshots);
+  if (!ingredients.length && !recipes.length) { ingredients = getStoredArray(STORAGE_KEYS.legacyIngredients); recipes = getStoredArray(STORAGE_KEYS.legacyRecipes); }
   state.ingredients = ingredients.map(migrateIngredient);
   state.recipes = recipes.map(migrateRecipe);
+  state.snapshots = Array.isArray(snapshots) ? snapshots : [];
   state.prefs = { ...state.prefs, ...getStoredObject(STORAGE_KEYS.prefs, {}) };
+  state.comparisonNotes = localStorage.getItem(STORAGE_KEYS.compareNotes) || '';
 
   const seededFlag = localStorage.getItem(STORAGE_KEYS.seeded) || localStorage.getItem(STORAGE_KEYS.legacySeeded);
   if (!state.ingredients.length && !state.recipes.length && !seededFlag) {
-    const seeds = sampleIngredients();
-    state.ingredients = seeds;
-    state.recipes = sampleRecipes(seeds);
+    state.ingredients = sampleIngredients();
+    state.recipes = sampleRecipes(state.ingredients);
+    state.snapshots = seedSnapshots();
     localStorage.setItem(STORAGE_KEYS.seeded, '1');
-    persistAll();
+  } else if (!state.snapshots.length && state.recipes.length) {
+    state.snapshots = seedSnapshots();
   }
 
   const storedDraft = safeParse(localStorage.getItem(STORAGE_KEYS.draft), null) || safeParse(localStorage.getItem(STORAGE_KEYS.legacyDraft), null);
   state.draft = storedDraft ? migrateRecipe(storedDraft) : null;
-
   persistAll();
 }
 
-/* ==============================
-   Rendering
-================================ */
-function getBadgeClass(classification) {
-  if (classification === 'Star') return 'badge-star';
-  if (classification === 'Plowhorse') return 'badge-plowhorse';
-  if (classification === 'Puzzle') return 'badge-puzzle';
-  if (classification === 'Dog') return 'badge-dog';
-  return 'badge-inactive';
+function readRowsFromDom() {
+  const rows = [...dom.ingredientRows.querySelectorAll('tr')].map((tr) => {
+    const q = (s) => tr.querySelector(s);
+    return migrateRow({ rowId: tr.dataset.rowId, ingredientId: q('.row-lib-select').value, ingredientNameSnapshot: q('.row-name').value, purchasePriceSnapshot: q('.row-price').value, packSizeSnapshot: q('.row-pack-size').value, packUnitSnapshot: q('.row-pack-unit').value, amountUsed: q('.row-amount').value, useUnit: q('.row-use-unit').value, calculatedCostUsed: q('.row-cost').dataset.cost });
+  });
+  return rows.length ? rows : [defaultIngredientRow()];
+}
+function readRecipeFromForm() {
+  return migrateRecipe({
+    id: state.activeRecipeId, name: dom.fields.name.value, category: dom.fields.category.value, portionsYielded: dom.fields.portions.value, targetFoodCostPercent: dom.fields.target.value,
+    packagingCostPerPortion: dom.fields.packaging.value, labourCostPerPortion: dom.fields.labour.value, vatRatePercent: dom.fields.vat.value, deliveryCommissionPercent: dom.fields.delivery.value, roundingRule: dom.fields.rounding.value,
+    manualMenuPrice: dom.fields.manual.value === '' ? '' : dom.fields.manual.value, sellingPrice: dom.fields.sellingPrice.value, unitsSold: dom.fields.unitsSold.value, reportingPeriod: dom.fields.reportingPeriod.value || 'Last 30 Days', internalScore: dom.fields.internalScore.value,
+    isActive: dom.fields.isActive.value === 'true', revenueOverride: dom.fields.revenueOverride.value === '' ? '' : dom.fields.revenueOverride.value, itemNotes: dom.fields.itemNotes.value, ingredientRows: readRowsFromDom(),
+  });
+}
+function setRecipeToForm(recipe) {
+  dom.fields.name.value = recipe.name; dom.fields.category.value = recipe.category; dom.fields.portions.value = recipe.portionsYielded; dom.fields.target.value = recipe.targetFoodCostPercent;
+  dom.fields.packaging.value = recipe.packagingCostPerPortion; dom.fields.labour.value = recipe.labourCostPerPortion; dom.fields.vat.value = recipe.vatRatePercent; dom.fields.delivery.value = recipe.deliveryCommissionPercent;
+  dom.fields.rounding.value = String(recipe.roundingRule); dom.fields.manual.value = recipe.manualMenuPrice === '' ? '' : recipe.manualMenuPrice; dom.fields.sellingPrice.value = recipe.sellingPrice;
+  dom.fields.unitsSold.value = recipe.unitsSold; dom.fields.reportingPeriod.value = recipe.reportingPeriod; dom.fields.internalScore.value = recipe.internalScore; dom.fields.isActive.value = String(recipe.isActive);
+  dom.fields.revenueOverride.value = recipe.revenueOverride; dom.fields.itemNotes.value = recipe.itemNotes;
+  dom.ingredientRows.innerHTML = ''; (recipe.ingredientRows?.length ? recipe.ingredientRows : [defaultIngredientRow()]).forEach(addRowToDom); recalcAndRender();
+}
+function addRowToDom(rowData = defaultIngredientRow()) {
+  const fragment = dom.template.content.cloneNode(true); const tr = fragment.querySelector('tr'); tr.dataset.rowId = rowData.rowId || uid('row');
+  const select = tr.querySelector('.row-lib-select'); select.innerHTML = '<option value="">Manual / Snapshot</option>';
+  state.ingredients.forEach((ing) => { const o = document.createElement('option'); o.value = ing.id; o.textContent = ing.name; select.appendChild(o); });
+  tr.querySelector('.row-name').value = rowData.ingredientNameSnapshot || ''; tr.querySelector('.row-price').value = rowData.purchasePriceSnapshot; tr.querySelector('.row-pack-size').value = rowData.packSizeSnapshot;
+  tr.querySelector('.row-pack-unit').value = rowData.packUnitSnapshot; tr.querySelector('.row-amount').value = rowData.amountUsed; tr.querySelector('.row-use-unit').value = rowData.useUnit; select.value = rowData.ingredientId || '';
+  select.addEventListener('change', () => {
+    const ing = state.ingredients.find((x) => x.id === select.value); if (!ing) return;
+    tr.querySelector('.row-name').value = ing.name; tr.querySelector('.row-price').value = ing.purchasePrice; tr.querySelector('.row-pack-size').value = ing.packSize; tr.querySelector('.row-pack-unit').value = ing.packUnit; tr.querySelector('.row-use-unit').value = ing.packUnit;
+    recalcAndRender();
+  });
+  ['.row-name', '.row-price', '.row-pack-size', '.row-pack-unit', '.row-amount', '.row-use-unit'].forEach((s) => { const el = tr.querySelector(s); el.addEventListener('input', recalcAndRender); el.addEventListener('change', recalcAndRender); });
+  tr.querySelector('.row-remove').addEventListener('click', () => { tr.remove(); if (!dom.ingredientRows.querySelector('tr')) addRowToDom(); recalcAndRender(); });
+  dom.ingredientRows.appendChild(fragment);
 }
 
 function renderRecipeList() {
-  const search = safeLower(state.recipeSearch);
-  const filtered = state.recipes
-    .map((r) => calculateRecipeMetrics(r, { suppressWarnings: true }))
-    .filter((r) => {
-      const searchMatch = !search || safeLower(r.name).includes(search);
-      const statusMatch = state.recipeStatusFilter === 'all' || (state.recipeStatusFilter === 'active' ? r.isActive : !r.isActive);
-      return searchMatch && statusMatch;
-    })
-    .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
-
-  dom.recipeCount.textContent = String(filtered.length);
-  dom.recipeList.innerHTML = '';
-
-  if (!filtered.length) {
-    dom.recipeList.innerHTML = '<li class="empty-state">No recipes found. Adjust search/filter or create a new recipe.</li>';
-    return;
-  }
-
-  filtered.forEach((recipe) => {
-    const li = document.createElement('li');
-    li.className = `recipe-item ${state.activeRecipeId === recipe.id ? 'active' : ''}`;
-    li.innerHTML = `
-      <h4>${recipe.name || '(Untitled Recipe)'}</h4>
-      <p>${recipe.category || 'No category'} · ${recipe.reportingPeriod}</p>
-      <div class="recipe-meta-row"><span>${fmtCurrency(recipe.effectiveMenuPrice)}</span><span>${fmtPercent(recipe.foodCostPercent)}</span></div>
-      <div class="recipe-meta-row"><span>${recipe.isActive ? 'Active' : 'Inactive'}</span><span>${recipe.unitsSold} units</span></div>
-    `;
-    li.addEventListener('click', () => {
-      state.activeRecipeId = recipe.id;
-      setRecipeToForm(migrateRecipe(recipe));
-      renderRecipeList();
-    });
-    dom.recipeList.appendChild(li);
+  const q = safeLower(state.recipeSearch);
+  const rows = state.recipes.map((r) => calculateRecipeMetrics(r, { suppressWarnings: true })).filter((r) => (!q || safeLower(r.name).includes(q)) && (state.recipeStatusFilter === 'all' || (state.recipeStatusFilter === 'active' ? r.isActive : !r.isActive))).sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+  dom.recipeCount.textContent = rows.length; dom.recipeList.innerHTML = '';
+  if (!rows.length) return dom.recipeList.innerHTML = '<li class="helper-text">No recipes found.</li>';
+  rows.forEach((r) => {
+    const li = document.createElement('li'); li.className = `recipe-item ${state.activeRecipeId === r.id ? 'active' : ''}`;
+    li.innerHTML = `<strong>${r.name || '(Untitled)'}</strong><p>${r.category || 'No category'} · ${r.reportingPeriod}</p><p>${fmtCurrency(r.effectiveMenuPrice)} · ${fmtInt(r.unitsSold)} units</p>`;
+    li.addEventListener('click', () => { state.activeRecipeId = r.id; setRecipeToForm(migrateRecipe(r)); renderRecipeList(); }); dom.recipeList.appendChild(li);
   });
-}
-
-function renderIngredientLibrary() {
-  const search = safeLower(state.ingredientSearch);
-  const usageCount = new Map();
-  state.recipes.forEach((r) => (r.ingredientRows || []).forEach((row) => {
-    if (row.ingredientId) usageCount.set(row.ingredientId, (usageCount.get(row.ingredientId) || 0) + 1);
-  }));
-
-  const rows = state.ingredients.filter((ing) => !search || safeLower(ing.name).includes(search));
-  dom.library.count.textContent = String(rows.length);
-  dom.library.body.innerHTML = '';
-  if (!rows.length) {
-    dom.library.body.innerHTML = '<tr class="analysis-empty"><td colspan="7">No ingredients found for this search.</td></tr>';
-    return;
-  }
-
-  rows.forEach((ing) => {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td>${ing.name}</td>
-      <td>${fmtCurrency(ing.purchasePrice)}</td>
-      <td>${fmtNumber(ing.packSize, 3)} ${ing.packUnit}</td>
-      <td>${ing.supplier || '—'}</td>
-      <td>${ing.notes || '—'}</td>
-      <td>${usageCount.get(ing.id) || 0}</td>
-      <td>
-        <button class="btn btn-secondary" data-action="edit" data-id="${ing.id}">Edit</button>
-        <button class="btn btn-danger" data-action="delete" data-id="${ing.id}">Delete</button>
-      </td>
-    `;
-    dom.library.body.appendChild(tr);
-  });
-}
-
-function renderInsights(metrics, classifiedItem) {
-  const insights = [];
-  if (metrics.foodCostPercent > metrics.targetFoodCostPercent) insights.push(`Food cost (${fmtPercent(metrics.foodCostPercent)}) is above target (${fmtPercent(metrics.targetFoodCostPercent)}).`);
-  if (metrics.grossProfitPerPortion <= 0) insights.push('Margin is negative or zero. Reprice or reduce cost now.');
-  if (metrics.deliveryAdjustedRecommendation > metrics.effectiveMenuPrice) insights.push('Delivery-adjusted recommendation is above current selling price.');
-  if (classifiedItem && classifiedItem.classification !== 'Unclassified' && classifiedItem.classification !== 'Inactive') insights.push(`This item is currently classified as ${classifiedItem.classification}.`);
-  if (!insights.length) insights.push('Costing and menu performance are within reasonable range.');
-  dom.insightList.innerHTML = insights.map((i) => `<li>${i}</li>`).join('');
-
-  const flags = getItemFlags(classifiedItem || metrics);
-  dom.itemFlagList.innerHTML = flags.length ? flags.map((f) => `<li>${f}</li>`).join('') : '<li>No major operational flags.</li>';
-}
-
-function recalcAndRender() {
-  const recipe = readRecipeFromForm();
-  const metrics = calculateRecipeMetrics(recipe);
-
-  [...dom.ingredientRows.querySelectorAll('tr')].forEach((tr, idx) => {
-    const costSpan = tr.querySelector('.row-cost');
-    const cost = metrics.ingredientRows[idx]?.calculatedCostUsed ?? 0;
-    costSpan.dataset.cost = String(cost);
-    costSpan.textContent = fmtCurrency(cost);
-  });
-
-  dom.results.totalIngredient.textContent = fmtCurrency(metrics.totalIngredientCost);
-  dom.results.ingredientPortion.textContent = fmtCurrency(metrics.ingredientCostPerPortion);
-  dom.results.totalPortion.textContent = fmtCurrency(metrics.totalCostPerPortionExclLabour);
-  dom.results.totalLabour.textContent = fmtCurrency(metrics.totalCostPerPortionInclLabour);
-  dom.results.suggestedNet.textContent = fmtCurrency(metrics.suggestedNetSellingPrice);
-  dom.results.rounded.textContent = fmtCurrency(metrics.roundedSellingPrice);
-  dom.results.vat.textContent = fmtCurrency(metrics.vatInclusivePrice);
-  dom.results.delivery.textContent = fmtCurrency(metrics.deliveryAdjustedRecommendation);
-  dom.results.gross.textContent = fmtCurrency(metrics.grossProfitPerPortion);
-  dom.results.foodRounded.textContent = fmtPercent(metrics.foodCostPercent);
-  dom.results.totalRevenue.textContent = fmtCurrency(metrics.revenue);
-  dom.results.totalGrossProfit.textContent = fmtCurrency(metrics.totalGrossProfit);
-
-  const ifLoaded = state.menuEngine?.items?.find((x) => x.id === metrics.id);
-  const label = ifLoaded?.classification || 'Unclassified';
-  dom.results.classification.textContent = label;
-  dom.results.action.textContent = getRecommendedAction(ifLoaded || { ...metrics, classification: label, isActive: metrics.isActive });
-
-  setInlineMessage(dom.calcWarnings, metrics.warnings.join(' · '), 'warn');
-  renderInsights(metrics, ifLoaded || { ...metrics, classification: label, isActive: metrics.isActive });
-
-  if (document.activeElement !== dom.fields.sellingPrice && (!recipe.sellingPrice || recipe.sellingPrice === 0) && metrics.roundedSellingPrice > 0) {
-    dom.fields.sellingPrice.value = fmtNumber(metrics.roundedSellingPrice, 2);
-  }
-
-  persistDraft();
 }
 
 function renderDashboard() {
-  const metricsItems = state.recipes.map((r) => calculateRecipeMetrics(r, { suppressWarnings: true }));
-  state.menuEngine = classifyMenuItems(metricsItems);
-  const classified = state.menuEngine.items.map((item) => ({ ...item, action: getRecommendedAction(item), flags: getItemFlags(item) }));
-  const dashboard = buildDashboard(classified, state.menuEngine);
-
-  dom.periodLabel.textContent = `Reporting period: ${classified.find((i) => i.reportingPeriod)?.reportingPeriod || 'mixed'}`;
-
+  const metrics = state.recipes.map((r) => calculateRecipeMetrics(r, { suppressWarnings: true }));
+  state.menuEngine = classifyMenuItems(metrics);
+  const items = state.menuEngine.items.map((i) => ({ ...i, flags: getItemFlags(i), action: recommendedAction(i) }));
+  const totals = totalsFromItems(items);
+  dom.periodLabel.textContent = `Period: ${items[0]?.reportingPeriod || 'mixed'}`;
   const cards = [
-    ['Active Items', dashboard.totals.totalActiveItems],
-    ['Total Units Sold', dashboard.totals.totalUnitsSold],
-    ['Total Revenue', fmtCurrency(dashboard.totals.totalRevenue)],
-    ['Total Gross Profit', fmtCurrency(dashboard.totals.totalGrossProfit)],
-    ['Avg Selling Price', fmtCurrency(dashboard.totals.avgSellingPrice)],
-    ['Avg Food Cost %', fmtPercent(dashboard.totals.avgFoodCostPercent)],
-    ['Avg GP / Portion', fmtCurrency(dashboard.totals.avgGrossProfitPerPortion)],
-    ['Stars', dashboard.totals.stars],
-    ['Plowhorses', dashboard.totals.plowhorses],
-    ['Puzzles', dashboard.totals.puzzles],
-    ['Dogs', dashboard.totals.dogs],
+    ['Active Items', totals.activeItems], ['Total Units', fmtInt(totals.totalUnits)], ['Total Revenue', fmtCurrency(totals.totalRevenue)], ['Total Gross Profit', fmtCurrency(totals.totalGrossProfit)],
+    ['Avg Selling Price', fmtCurrency(totals.avgSellingPrice)], ['Avg GP / Portion', fmtCurrency(totals.avgGrossProfitPerPortion)], ['Avg Food Cost %', fmtPercent(totals.avgFoodCostPercent)],
+    ['Stars', totals.stars], ['Plowhorses', totals.plowhorses], ['Puzzles', totals.puzzles], ['Dogs', totals.dogs],
+    ['Improved Items', state.comparison?.summary?.improved ?? 0], ['Worsened Items', state.comparison?.summary?.worsened ?? 0], ['Need Action', items.filter((i) => i.flags.length).length],
   ];
   dom.dashboardCards.innerHTML = cards.map(([k, v]) => `<div class="metric-card"><span>${k}</span><strong>${v}</strong></div>`).join('');
 
-  dom.bulkFlagSummary.innerHTML = `
-    <li>Items above food cost target: ${dashboard.flagCounts.aboveFoodCostTarget}</li>
-    <li>Items priced below recommendation: ${dashboard.flagCounts.pricedBelowRecommendation}</li>
-    <li>Items needing review: ${dashboard.flagCounts.needsReview}</li>
-    <li>Items missing sales data: ${dashboard.flagCounts.missingSalesData}</li>
-  `;
+  const topRevenue = [...items].sort((a, b) => b.revenue - a.revenue)[0];
+  const topProfit = [...items].sort((a, b) => b.totalGrossProfit - a.totalGrossProfit)[0];
+  const weakestMargin = [...items].sort((a, b) => a.grossProfitPerPortion - b.grossProfitPerPortion)[0];
+  const highFoodCost = items.filter((i) => i.foodCostPercent > state.prefs.foodCostFlagTarget);
+  const lowPrice = items.filter((i) => i.effectiveMenuPrice < i.roundedSellingPrice);
+  const highlights = [
+    `Biggest revenue driver: ${topRevenue ? `${topRevenue.name} (${fmtCurrency(topRevenue.revenue)})` : 'N/A'}`,
+    `Biggest profit driver: ${topProfit ? `${topProfit.name} (${fmtCurrency(topProfit.totalGrossProfit)})` : 'N/A'}`,
+    `Weakest margin item: ${weakestMargin ? `${weakestMargin.name} (${fmtCurrency(weakestMargin.grossProfitPerPortion)}/portion)` : 'N/A'}`,
+    `${highFoodCost.length} item(s) above target food cost (${state.prefs.foodCostFlagTarget}%)`,
+    `${lowPrice.length} item(s) priced below recommendation`,
+    state.comparison ? `Classification changes in selected comparison: ${state.comparison.summary.changedClasses}` : 'Run a comparison to see period movement.',
+  ];
+  dom.menuInsightList.innerHTML = highlights.map((h) => `<li>${h}</li>`).join('');
 
-  dom.topUnitsList.innerHTML = dashboard.topUnits.map((i) => `<li>${i.name} (${fmtInt(i.unitsSold)} units)</li>`).join('') || '<li>No active items.</li>';
-  dom.topProfitList.innerHTML = dashboard.topProfit.map((i) => `<li>${i.name} (${fmtCurrency(i.totalGrossProfit)})</li>`).join('') || '<li>No active items.</li>';
-  dom.menuInsightList.innerHTML = dashboard.insights.map((text) => `<li>${text}</li>`).join('');
+  const priorities = [...items].flatMap((i) => i.flags.map((flag) => ({ name: i.name, flag, severity: i.grossProfitPerPortion <= 0.15 || i.classification === 'Dog' ? 'High' : flag.includes('Low sales') ? 'Low' : 'Medium', action: recommendedAction(i) })))
+    .sort((a, b) => ({ High: 3, Medium: 2, Low: 1 }[b.severity] - ({ High: 3, Medium: 2, Low: 1 }[a.severity]))).slice(0, 10);
+  dom.priorityList.innerHTML = priorities.length ? priorities.map((p) => `<li><strong>${p.name}</strong> — ${p.flag} <span class="movement-chip">${p.severity}</span><br/><span class="helper-text">${p.action}</span></li>`).join('') : '<li>No priority flags.</li>';
 
-  renderAnalysisTable(classified);
-  renderMatrix(classified, state.menuEngine);
-
-  const activeId = state.activeRecipeId;
-  if (activeId) {
-    const activeClassified = classified.find((x) => x.id === activeId);
-    if (activeClassified) {
-      dom.results.classification.textContent = activeClassified.classification;
-      dom.results.action.textContent = activeClassified.action;
-      renderInsights(activeClassified, activeClassified);
-    }
-  }
+  renderAnalysisTable(items);
+  renderMatrix(items);
+  renderSnapshotList();
+  renderComparisonSummary();
 }
 
-function renderAnalysisTable(classifiedItems) {
-  let rows = [...classifiedItems];
-  const q = safeLower(state.analysisSearch);
-  if (q) rows = rows.filter((i) => safeLower(i.name).includes(q));
+function renderAnalysisTable(items) {
+  let rows = [...items];
+  if (state.analysisSearch) rows = rows.filter((i) => safeLower(i.name).includes(safeLower(state.analysisSearch)));
   if (state.analysisClassFilter !== 'all') rows = rows.filter((i) => i.classification === state.analysisClassFilter);
-
-  const key = state.sort.key;
-  dom.analysisTable.querySelectorAll('th[data-sort]').forEach((th) => {
-    th.classList.toggle('sorting-active', th.dataset.sort === key);
-  });
-  const dir = state.sort.dir === 'asc' ? 1 : -1;
-  rows.sort((a, b) => {
-    const av = a[key];
-    const bv = b[key];
-    if (typeof av === 'string' || typeof bv === 'string') return String(av).localeCompare(String(bv)) * dir;
-    return (toNumber(av, 0) - toNumber(bv, 0)) * dir;
-  });
-
-  if (!rows.length) {
-    dom.analysisBody.innerHTML = '<tr class="analysis-empty"><td colspan="11">No items match the current search/filter.</td></tr>';
-    return;
-  }
-
-  dom.analysisBody.innerHTML = rows.map((item) => {
-    const badge = `<span class="badge ${getBadgeClass(item.classification)}">${item.classification}</span>`;
-    const flags = item.flags.map((f) => `<span class="badge badge-flag">${f}</span>`).join('') || '—';
-    return `
-      <tr>
-        <td>${item.name}</td>
-        <td>${badge}</td>
-        <td>${fmtCurrency(item.effectiveMenuPrice)}</td>
-        <td>${fmtCurrency(item.totalCostPerPortionExclLabour)}</td>
-        <td class="${item.grossProfitPerPortion > 0 ? 'value-good' : 'value-bad'}">${fmtCurrency(item.grossProfitPerPortion)}</td>
-        <td class="${item.foodCostPercent > state.prefs.foodCostFlagTarget ? 'value-warn' : ''}">${fmtPercent(item.foodCostPercent)}</td>
-        <td>${fmtInt(item.unitsSold)}</td>
-        <td>${fmtCurrency(item.revenue)}</td>
-        <td>${fmtCurrency(item.totalGrossProfit)}</td>
-        <td>${item.action}</td>
-        <td>${flags}</td>
-      </tr>
-    `;
-  }).join('');
+  const dir = state.sort.dir === 'asc' ? 1 : -1; const k = state.sort.key;
+  rows.sort((a, b) => (typeof a[k] === 'string' ? String(a[k]).localeCompare(String(b[k])) : toNumber(a[k]) - toNumber(b[k])) * dir);
+  dom.analysisBody.innerHTML = rows.length ? rows.map((i) => `<tr><td>${i.name}</td><td><span class="badge badge-${i.classification.toLowerCase()}">${i.classification}</span></td><td>${fmtCurrency(i.effectiveMenuPrice)}</td><td>${fmtCurrency(i.grossProfitPerPortion)}</td><td class="${i.foodCostPercent > state.prefs.foodCostFlagTarget ? 'value-warn' : ''}">${fmtPercent(i.foodCostPercent)}</td><td>${fmtInt(i.unitsSold)}</td><td>${fmtCurrency(i.revenue)}</td><td>${fmtCurrency(i.totalGrossProfit)}</td><td>${i.action}</td></tr>`).join('') : '<tr><td colspan="9">No items match filters.</td></tr>';
 }
-
-function renderMatrix(classifiedItems, menuEngine) {
-  const active = classifiedItems.filter((i) => i.isActive && i.classification !== 'Unclassified');
-  dom.matrixChart.innerHTML = '';
-  ['star', 'plowhorse', 'puzzle', 'dog'].forEach((c) => {
-    const label = document.createElement('div');
-    label.className = `matrix-quad-label ${c}`;
-    label.textContent = c[0].toUpperCase() + c.slice(1);
-    dom.matrixChart.appendChild(label);
-  });
-  dom.matrixChart.insertAdjacentHTML('beforeend', `
-    <div class="matrix-axis y">Higher gross profit / portion</div>
-    <div class="matrix-axis x">Higher units sold</div>
-  `);
-
-  if (menuEngine.fallback || active.length < 2) {
-    dom.matrixFallback.textContent = menuEngine.fallback || 'Add more active items to view matrix.';
-    return;
-  }
-  dom.matrixFallback.textContent = `High popularity threshold: ${fmtNumber(menuEngine.averages.unitsSold, 1)} units · High profitability threshold: ${fmtCurrency(menuEngine.averages.grossProfitPerPortion)}`;
-
-  const maxUnits = Math.max(...active.map((i) => i.unitsSold), menuEngine.averages.unitsSold);
-  const maxProfit = Math.max(...active.map((i) => i.grossProfitPerPortion), menuEngine.averages.grossProfitPerPortion, 0.01);
-  const avgX = clamp((menuEngine.averages.unitsSold / maxUnits) * 100, 0, 100);
-  const avgY = clamp((menuEngine.averages.grossProfitPerPortion / maxProfit) * 100, 0, 100);
-  dom.matrixChart.insertAdjacentHTML('beforeend', `<div class="matrix-average-line y" style="left:${avgX}%"></div>`);
-  dom.matrixChart.insertAdjacentHTML('beforeend', `<div class="matrix-average-line x" style="bottom:${avgY}%"></div>`);
-
-  active.forEach((item) => {
-    const xPct = clamp((item.unitsSold / maxUnits) * 100, 4, 96);
-    const yPct = clamp((item.grossProfitPerPortion / maxProfit) * 100, 4, 96);
-    const point = document.createElement('div');
-    point.className = `matrix-point ${getBadgeClass(item.classification)}`;
-    point.style.left = `${xPct}%`;
-    point.style.bottom = `${yPct}%`;
-    point.title = `${item.name} · ${item.classification}`;
-    point.textContent = item.name.length > 18 ? `${item.name.slice(0, 17)}…` : item.name;
-    dom.matrixChart.appendChild(point);
+function renderMatrix(items) {
+  const active = items.filter((i) => i.isActive && i.classification !== 'Unclassified'); dom.matrixChart.innerHTML = '';
+  if (active.length < 2) { dom.matrixFallback.textContent = 'Add more active items to render matrix.'; return; }
+  dom.matrixFallback.textContent = '';
+  const maxU = Math.max(...active.map((i) => i.unitsSold), 1); const maxG = Math.max(...active.map((i) => i.grossProfitPerPortion), 0.01);
+  active.forEach((i) => {
+    const p = document.createElement('div'); p.className = `matrix-point badge-${i.classification.toLowerCase()}`; p.style.left = `${clamp((i.unitsSold / maxU) * 100, 4, 96)}%`; p.style.bottom = `${clamp((i.grossProfitPerPortion / maxG) * 100, 4, 96)}%`; p.title = `${i.name} · ${i.classification}`; p.textContent = i.name.length > 16 ? `${i.name.slice(0, 15)}…` : i.name; dom.matrixChart.appendChild(p);
   });
 }
 
-/* ==============================
-   Actions - Ingredient Library
-================================ */
-function readIngredientForm() {
-  return {
-    name: cleanText(dom.library.name.value),
-    purchasePrice: toNumber(dom.library.price.value, 0),
-    packSize: toNumber(dom.library.packSize.value, 0),
-    packUnit: dom.library.packUnit.value,
-    supplier: cleanText(dom.library.supplier.value),
-    notes: cleanText(dom.library.notes.value),
-  };
+function renderSnapshotSelectors() {
+  const options = ['<option value="live">Current Live Data</option>', ...state.snapshots.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).map((s) => `<option value="${s.id}">${s.name} · ${s.periodLabel}</option>`)];
+  dom.compareLeft.innerHTML = options.join(''); dom.compareRight.innerHTML = options.join('');
+  if (!dom.compareRight.value && state.snapshots[0]) dom.compareRight.value = state.snapshots[0].id;
+  if (!dom.compareLeft.value) dom.compareLeft.value = 'live';
+}
+function renderSnapshotList() {
+  dom.snapshotList.innerHTML = state.snapshots.length ? state.snapshots.slice().sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).map((s) => `<li><strong>${s.name}</strong> (${s.periodLabel})<br/><span class="helper-text">${new Date(s.createdAt).toLocaleString()} · ${s.notes || 'No notes'}</span><br/><button class="btn btn-secondary" data-snapshot-view="${s.id}" type="button">Load</button> <button class="btn btn-danger" data-snapshot-delete="${s.id}" type="button">Delete</button></li>`).join('') : '<li>No snapshots yet.</li>';
+}
+function renderComparisonSummary() {
+  if (!state.comparison) { dom.comparisonSummary.innerHTML = '<li>No comparison selected.</li>'; dom.comparisonBody.innerHTML = '<tr><td colspan="10">Select periods and run comparison.</td></tr>'; dom.modeIndicator.textContent = 'Mode: Live'; return; }
+  const s = state.comparison.summary;
+  const pct = (v) => (v === null || !Number.isFinite(v) ? 'n/a' : `${v.toFixed(1)}%`);
+  dom.comparisonSummary.innerHTML = [
+    `Revenue: ${s.revenueDelta >= 0 ? '▲' : '▼'} ${fmtCurrency(s.revenueDelta)} (${pct(s.revenuePct)})`,
+    `Gross profit: ${s.grossProfitDelta >= 0 ? '▲' : '▼'} ${fmtCurrency(s.grossProfitDelta)} (${pct(s.grossProfitPct)})`,
+    `Units sold: ${s.unitsDelta >= 0 ? '▲' : '▼'} ${fmtInt(s.unitsDelta)} (${pct(s.unitsPct)})`,
+    `Avg food cost: ${s.foodCostDelta >= 0 ? '▲' : '▼'} ${s.foodCostDelta.toFixed(2)} pts`,
+    `Avg GP/portion: ${s.gpPerPortionDelta >= 0 ? '▲' : '▼'} ${fmtCurrency(s.gpPerPortionDelta)}`,
+    `Class changes: ${s.changedClasses} · Improved: ${s.improved} · Worsened: ${s.worsened}`,
+  ].map((x) => `<li>${x}</li>`).join('');
+  dom.modeIndicator.textContent = `Mode: Comparison (${state.comparison.leftLabel} → ${state.comparison.rightLabel})`;
+  renderComparisonTable();
+}
+function renderComparisonTable() {
+  if (!state.comparison) return;
+  let rows = [...state.comparison.rows];
+  if (state.compareSearch) rows = rows.filter((r) => safeLower(r.name).includes(safeLower(state.compareSearch)));
+  if (state.compareMovementFilter === 'improved') rows = rows.filter((r) => r.improved);
+  if (state.compareMovementFilter === 'worsened') rows = rows.filter((r) => r.worsened);
+  if (state.compareMovementFilter === 'changed') rows = rows.filter((r) => r.oldClassification !== r.newClassification);
+  const k = state.csort.key; const dir = state.csort.dir === 'asc' ? 1 : -1;
+  rows.sort((a, b) => (typeof a[k] === 'string' ? String(a[k]).localeCompare(String(b[k])) : toNumber(a[k]) - toNumber(b[k])) * dir);
+  dom.comparisonBody.innerHTML = rows.length ? rows.map((r) => `<tr><td>${r.name}</td><td>${r.oldClassification}</td><td>${r.newClassification}</td><td class="${r.priceChange >= 0 ? 'value-good' : 'value-bad'}">${fmtCurrency(r.priceChange)}</td><td class="${r.unitsChange >= 0 ? 'value-good' : 'value-bad'}">${fmtInt(r.unitsChange)}</td><td class="${r.revenueChange >= 0 ? 'value-good' : 'value-bad'}">${fmtCurrency(r.revenueChange)}</td><td class="${r.profitChange >= 0 ? 'value-good' : 'value-bad'}">${fmtCurrency(r.profitChange)}</td><td>${r.foodCostChange.toFixed(2)} pts</td><td><span class="movement-chip ${r.worsened ? 'movement-down' : 'movement-up'}">${r.movement}</span></td><td>${r.action} <span class="movement-chip">${r.severity}</span></td></tr>`).join('') : '<tr><td colspan="10">No comparable items for filters.</td></tr>';
 }
 
-function clearIngredientForm() {
-  state.ingredientEditingId = null;
-  dom.library.name.value = '';
-  dom.library.price.value = '';
-  dom.library.packSize.value = '';
-  dom.library.packUnit.value = '';
-  dom.library.supplier.value = '';
-  dom.library.notes.value = '';
-  setInlineMessage(dom.library.errors, '', 'warn');
+function recalcAndRender() {
+  const r = readRecipeFromForm(); const m = calculateRecipeMetrics(r);
+  [...dom.ingredientRows.querySelectorAll('tr')].forEach((tr, i) => {
+    const c = m.ingredientRows[i]?.calculatedCostUsed ?? 0; const cell = tr.querySelector('.row-cost'); cell.dataset.cost = c; cell.textContent = fmtCurrency(c);
+  });
+  dom.results.totalIngredient.textContent = fmtCurrency(m.totalIngredientCost); dom.results.totalPortion.textContent = fmtCurrency(m.totalCostPerPortionExclLabour);
+  dom.results.rounded.textContent = fmtCurrency(m.roundedSellingPrice); dom.results.gross.textContent = fmtCurrency(m.grossProfitPerPortion); dom.results.foodRounded.textContent = fmtPercent(m.foodCostPercent);
+  dom.results.totalRevenue.textContent = fmtCurrency(m.revenue); dom.results.totalGrossProfit.textContent = fmtCurrency(m.totalGrossProfit);
+  const classified = state.menuEngine?.items?.find((x) => x.id === m.id) || { ...m, classification: 'Unclassified' };
+  dom.results.classification.textContent = classified.classification; dom.results.action.textContent = recommendedAction(classified);
+  dom.insightList.innerHTML = [m.foodCostPercent > m.targetFoodCostPercent ? `Food cost (${fmtPercent(m.foodCostPercent)}) above target.` : 'Food cost near target.', m.effectiveMenuPrice < m.roundedSellingPrice ? 'Current price is below recommendation.' : 'Current price is aligned with recommendation.'].map((x) => `<li>${x}</li>`).join('');
+  dom.itemFlagList.innerHTML = getItemFlags(classified).map((x) => `<li>${x}</li>`).join('') || '<li>No major flags.</li>';
+  setInlineMessage(dom.calcWarnings, m.warnings.join(' · '));
+  if (document.activeElement !== dom.fields.sellingPrice && (!toNumber(dom.fields.sellingPrice.value) || toNumber(dom.fields.sellingPrice.value) === 0) && m.roundedSellingPrice > 0) dom.fields.sellingPrice.value = m.roundedSellingPrice.toFixed(2);
+  persistDraft();
 }
 
-function onAddIngredient() {
-  const input = readIngredientForm();
-  const errors = validateIngredientInput(input);
-  if (errors.length) return setInlineMessage(dom.library.errors, errors.join(' '), 'warn');
-
-  state.ingredients.push({ id: uid('ing'), ...input });
-  persistAll();
-  clearIngredientForm();
-  renderIngredientLibrary();
-  refreshRowIngredientOptions();
+function validateRecipe(r) {
+  const e = []; if (!r.name) e.push('Recipe name is required.'); if (!(r.portionsYielded > 0)) e.push('Portions yielded must be greater than 0.'); if (!(r.targetFoodCostPercent > 0 && r.targetFoodCostPercent < 100)) e.push('Target food cost must be between 0 and 100.');
+  return e;
 }
-
-function onUpdateIngredient() {
-  if (!state.ingredientEditingId) return setInlineMessage(dom.library.errors, 'Select an ingredient to update.', 'warn');
-  const input = readIngredientForm();
-  const errors = validateIngredientInput(input, state.ingredientEditingId);
-  if (errors.length) return setInlineMessage(dom.library.errors, errors.join(' '), 'warn');
-
-  state.ingredients = state.ingredients.map((ing) => (ing.id === state.ingredientEditingId ? { ...ing, ...input } : ing));
-  persistAll();
-  clearIngredientForm();
-  renderIngredientLibrary();
-  refreshRowIngredientOptions();
-}
-
-function refreshRowIngredientOptions() {
-  const rows = readRowsFromDom();
-  dom.ingredientRows.innerHTML = '';
-  rows.forEach(addRowToDom);
-}
-
-function onIngredientTableClick(event) {
-  const btn = event.target.closest('button[data-action]');
-  if (!btn) return;
-  const id = btn.dataset.id;
-  const ing = state.ingredients.find((x) => x.id === id);
-  if (!ing) return;
-
-  if (btn.dataset.action === 'edit') {
-    state.ingredientEditingId = id;
-    dom.library.name.value = ing.name;
-    dom.library.price.value = ing.purchasePrice;
-    dom.library.packSize.value = ing.packSize;
-    dom.library.packUnit.value = ing.packUnit;
-    dom.library.supplier.value = ing.supplier;
-    dom.library.notes.value = ing.notes;
-    setInlineMessage(dom.library.errors, 'Ingredient loaded for editing.', 'success');
-    return;
-  }
-
-  const usage = state.recipes.some((r) => (r.ingredientRows || []).some((row) => row.ingredientId === id));
-  if (usage && !window.confirm('This ingredient is linked in saved recipes. Delete anyway?')) return;
-  state.ingredients = state.ingredients.filter((x) => x.id !== id);
-  persistAll();
-  renderIngredientLibrary();
-  refreshRowIngredientOptions();
-}
-
-/* ==============================
-   Actions - Recipe CRUD
-================================ */
+function resetRecipeForm() { state.activeRecipeId = null; setRecipeToForm(defaultRecipe()); setInlineMessage(dom.editorErrors, ''); }
 function upsertRecipe(mode) {
-  const recipe = readRecipeFromForm();
-  const errors = validateRecipe(recipe);
-  markValidation(recipe);
-  if (errors.length) return setInlineMessage(dom.editorErrors, errors.join(' '), 'warn');
+  const r = readRecipeFromForm(); const errors = validateRecipe(r); if (errors.length) return setInlineMessage(dom.editorErrors, errors.join(' '));
+  if (mode === 'save') { r.id = uid('rec'); r.createdAt = nowIso(); r.updatedAt = nowIso(); state.recipes.unshift(r); state.activeRecipeId = r.id; setInlineMessage(dom.editorErrors, 'Recipe saved.', 'success'); }
+  if (mode === 'update') { if (!state.activeRecipeId) return setInlineMessage(dom.editorErrors, 'Select a recipe to update.'); r.id = state.activeRecipeId; const old = state.recipes.find((x) => x.id === r.id); r.createdAt = old?.createdAt || nowIso(); r.updatedAt = nowIso(); state.recipes = state.recipes.map((x) => x.id === r.id ? r : x); setInlineMessage(dom.editorErrors, 'Recipe updated.', 'success'); }
+  persistAll(); renderRecipeList(); renderDashboard();
+}
+function duplicateRecipe() { const src = state.recipes.find((r) => r.id === state.activeRecipeId); if (!src) return setInlineMessage(dom.editorErrors, 'Select a recipe to duplicate.'); const cp = migrateRecipe({ ...src, id: uid('rec'), name: `${src.name} (Copy)`, createdAt: nowIso(), updatedAt: nowIso() }); state.recipes.unshift(cp); state.activeRecipeId = cp.id; persistAll(); setRecipeToForm(cp); renderRecipeList(); renderDashboard(); }
+function deleteRecipe() { const rec = state.recipes.find((r) => r.id === state.activeRecipeId); if (!rec) return setInlineMessage(dom.editorErrors, 'Select a recipe to delete.'); if (!window.confirm(`Delete "${rec.name}"?`)) return; state.recipes = state.recipes.filter((r) => r.id !== rec.id); state.activeRecipeId = null; persistAll(); resetRecipeForm(); renderRecipeList(); renderDashboard(); }
 
-  if (mode === 'save') {
-    recipe.id = uid('rec');
-    recipe.createdAt = nowIso();
-    recipe.updatedAt = nowIso();
-    state.recipes.unshift(recipe);
-    state.activeRecipeId = recipe.id;
-    setInlineMessage(dom.editorErrors, 'Recipe saved.', 'success');
-  } else if (mode === 'update') {
-    if (!state.activeRecipeId) return setInlineMessage(dom.editorErrors, 'Select a recipe to update.', 'warn');
-    recipe.id = state.activeRecipeId;
-    const existing = state.recipes.find((r) => r.id === state.activeRecipeId);
-    recipe.createdAt = existing?.createdAt || nowIso();
-    recipe.updatedAt = nowIso();
-    state.recipes = state.recipes.map((r) => (r.id === recipe.id ? recipe : r));
-    setInlineMessage(dom.editorErrors, 'Recipe updated.', 'success');
+function readIngredientForm() { return { name: cleanText(dom.library.name.value), purchasePrice: toNumber(dom.library.price.value), packSize: toNumber(dom.library.packSize.value), packUnit: dom.library.packUnit.value, supplier: cleanText(dom.library.supplier.value), notes: cleanText(dom.library.notes.value) }; }
+function clearIngredientForm() { state.ingredientEditingId = null; dom.library.name.value = ''; dom.library.price.value = ''; dom.library.packSize.value = ''; dom.library.packUnit.value = ''; dom.library.supplier.value = ''; dom.library.notes.value = ''; setInlineMessage(dom.library.errors, ''); }
+function renderIngredientLibrary() {
+  const q = safeLower(state.ingredientSearch); const usage = new Map(); state.recipes.forEach((r) => (r.ingredientRows || []).forEach((row) => { if (row.ingredientId) usage.set(row.ingredientId, (usage.get(row.ingredientId) || 0) + 1); }));
+  const rows = state.ingredients.filter((i) => !q || safeLower(i.name).includes(q)); dom.library.count.textContent = rows.length; dom.library.body.innerHTML = rows.length ? rows.map((i) => `<tr><td>${i.name}</td><td>${fmtCurrency(i.purchasePrice)}</td><td>${i.packSize} ${i.packUnit}</td><td>${i.supplier || '—'}</td><td>${i.notes || '—'}</td><td>${usage.get(i.id) || 0}</td><td><button class="btn btn-secondary" data-action="edit" data-id="${i.id}">Edit</button> <button class="btn btn-danger" data-action="delete" data-id="${i.id}">Delete</button></td></tr>`).join('') : '<tr><td colspan="7">No ingredients found.</td></tr>';
+}
+function refreshRowIngredientOptions() { const rows = readRowsFromDom(); dom.ingredientRows.innerHTML = ''; rows.forEach(addRowToDom); }
+
+function createSnapshot() {
+  const name = cleanText(dom.snapshotName.value); if (!name) return setInlineMessage(dom.snapshotFeedback, 'Snapshot name is required.');
+  const periodLabel = cleanText(dom.snapshotPeriod.value || dom.fields.reportingPeriod.value || 'Mixed Periods');
+  const notes = cleanText(dom.snapshotNotes.value);
+  const snap = snapshotFromItems(name, periodLabel, notes);
+  state.snapshots.unshift(snap); persistAll(); renderSnapshotSelectors(); renderSnapshotList();
+  dom.snapshotName.value = ''; dom.snapshotPeriod.value = ''; dom.snapshotNotes.value = '';
+  setInlineMessage(dom.snapshotFeedback, `Snapshot "${snap.name}" created.`, 'success');
+}
+function findPeriodBySelector(value) {
+  if (value === 'live') {
+    const metrics = state.recipes.map((r) => calculateRecipeMetrics(r, { suppressWarnings: true }));
+    const items = classifyMenuItems(metrics).items.map((i) => ({ ...i, flags: getItemFlags(i), action: recommendedAction(i) }));
+    return { label: 'Current Live', items };
   }
-
-  persistAll();
-  renderRecipeList();
+  const snap = state.snapshots.find((s) => s.id === value);
+  return snap ? { label: `${snap.name} (${snap.periodLabel})`, items: snap.items } : null;
+}
+function runComparison() {
+  const left = findPeriodBySelector(dom.compareLeft.value); const right = findPeriodBySelector(dom.compareRight.value);
+  if (!left || !right) return setInlineMessage(dom.snapshotFeedback, 'Please select valid periods for comparison.');
+  if (dom.compareLeft.value === dom.compareRight.value) return setInlineMessage(dom.snapshotFeedback, 'Pick two different periods.');
+  state.comparison = { ...comparePeriods(left.items, right.items), leftLabel: left.label, rightLabel: right.label, notes: cleanText(dom.comparisonNotes.value) };
+  localStorage.setItem(STORAGE_KEYS.compareNotes, state.comparison.notes || '');
+  setInlineMessage(dom.snapshotFeedback, `Comparison ready: ${left.label} → ${right.label}.`, 'success');
   renderDashboard();
 }
+function clearComparison() { state.comparison = null; dom.comparisonNotes.value = ''; localStorage.removeItem(STORAGE_KEYS.compareNotes); renderDashboard(); setInlineMessage(dom.snapshotFeedback, 'Comparison cleared.', 'success'); }
 
-function duplicateRecipe() {
-  if (!state.activeRecipeId) return setInlineMessage(dom.editorErrors, 'Select a recipe to duplicate.', 'warn');
-  const source = state.recipes.find((r) => r.id === state.activeRecipeId);
-  if (!source) return;
-  const copy = migrateRecipe({ ...source, id: uid('rec'), name: `${source.name} (Copy)`, createdAt: nowIso(), updatedAt: nowIso() });
-  state.recipes.unshift(copy);
-  state.activeRecipeId = copy.id;
-  persistAll();
-  setRecipeToForm(copy);
-  setInlineMessage(dom.editorErrors, 'Recipe duplicated.', 'success');
-  renderRecipeList();
-  renderDashboard();
+function csvEscape(v) { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; }
+function downloadCsv(filename, headers, rows) {
+  if (!rows.length) return setInlineMessage(dom.snapshotFeedback, 'No rows available for CSV export.');
+  const csv = [headers.join(','), ...rows.map((r) => headers.map((h) => csvEscape(r[h])).join(','))].join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = filename; a.click(); URL.revokeObjectURL(a.href);
+}
+function exportCurrentCsv() {
+  const items = state.menuEngine?.items || classifyMenuItems(state.recipes.map((r) => calculateRecipeMetrics(r, { suppressWarnings: true }))).items;
+  downloadCsv('menu-current-analysis.csv', ['name', 'classification', 'effectiveMenuPrice', 'unitsSold', 'revenue', 'grossProfitPerPortion', 'totalGrossProfit', 'foodCostPercent', 'action'], items.map((i) => ({ ...i, action: recommendedAction(i) })));
+}
+function exportComparisonCsv() {
+  if (!state.comparison) return setInlineMessage(dom.snapshotFeedback, 'Run comparison before exporting.');
+  const rows = state.comparison.rows.map((r) => ({ name: r.name, oldClassification: r.oldClassification, newClassification: r.newClassification, priceChange: r.priceChange.toFixed(2), unitsChange: r.unitsChange, revenueChange: r.revenueChange.toFixed(2), profitChange: r.profitChange.toFixed(2), foodCostChange: r.foodCostChange.toFixed(2), movement: r.movement, severity: r.severity, action: r.action }));
+  downloadCsv('snapshot-comparison.csv', ['name', 'oldClassification', 'newClassification', 'priceChange', 'unitsChange', 'revenueChange', 'profitChange', 'foodCostChange', 'movement', 'severity', 'action'], rows);
+}
+function reviewSummaryText() {
+  const totals = totalsFromItems((state.menuEngine?.items || []).map((i) => ({ ...i, action: recommendedAction(i), flags: getItemFlags(i) })));
+  const lines = [
+    `Menu Price Engine Stage 4 Review`,
+    `Active items: ${totals.activeItems} | Units: ${fmtInt(totals.totalUnits)} | Revenue: ${fmtCurrency(totals.totalRevenue)} | Gross Profit: ${fmtCurrency(totals.totalGrossProfit)}`,
+    `Stars: ${totals.stars}, Plowhorses: ${totals.plowhorses}, Puzzles: ${totals.puzzles}, Dogs: ${totals.dogs}`,
+  ];
+  if (state.comparison) lines.push(`Comparison: ${state.comparison.leftLabel} -> ${state.comparison.rightLabel}; Revenue delta ${fmtCurrency(state.comparison.summary.revenueDelta)}, GP delta ${fmtCurrency(state.comparison.summary.grossProfitDelta)}, Class changes ${state.comparison.summary.changedClasses}.`);
+  if (state.comparison?.notes) lines.push(`Comparison notes: ${state.comparison.notes}`);
+  return lines.join('\n');
 }
 
-function deleteRecipe() {
-  if (!state.activeRecipeId) return setInlineMessage(dom.editorErrors, 'Select a recipe to delete.', 'warn');
-  const current = state.recipes.find((r) => r.id === state.activeRecipeId);
-  if (!current) return;
-  if (!window.confirm(`Delete "${current.name}"? This cannot be undone.`)) return;
-  state.recipes = state.recipes.filter((r) => r.id !== state.activeRecipeId);
-  state.activeRecipeId = null;
-  persistAll();
-  resetRecipeForm();
-  setInlineMessage(dom.editorErrors, 'Recipe deleted.', 'success');
-  renderRecipeList();
-  renderDashboard();
-}
-
-/* ==============================
-   Event Wiring
-================================ */
 function bindEvents() {
-  dom.actions.addRow.addEventListener('click', () => {
-    addRowToDom(defaultIngredientRow());
-    recalcAndRender();
-  });
+  dom.actions.addRow.addEventListener('click', () => { addRowToDom(defaultIngredientRow()); recalcAndRender(); });
+  dom.actions.save.addEventListener('click', () => upsertRecipe('save')); dom.actions.update.addEventListener('click', () => upsertRecipe('update')); dom.actions.duplicate.addEventListener('click', duplicateRecipe); dom.actions.del.addEventListener('click', deleteRecipe); dom.actions.reset.addEventListener('click', resetRecipeForm); dom.actions.newRecipe.addEventListener('click', resetRecipeForm);
+  dom.recipeSearch.addEventListener('input', (e) => { state.recipeSearch = e.target.value; renderRecipeList(); });
+  dom.recipeStatusFilter.addEventListener('change', (e) => { state.recipeStatusFilter = e.target.value; renderRecipeList(); });
+  Object.values(dom.fields).forEach((el) => { el.addEventListener('input', recalcAndRender); el.addEventListener('change', recalcAndRender); });
+  dom.analysisSearch.addEventListener('input', (e) => { state.analysisSearch = e.target.value; renderDashboard(); }); dom.analysisClassFilter.addEventListener('change', (e) => { state.analysisClassFilter = e.target.value; renderDashboard(); });
+  dom.analysisTable.querySelectorAll('th[data-sort]').forEach((th) => th.addEventListener('click', () => { const k = th.dataset.sort; if (state.sort.key === k) state.sort.dir = state.sort.dir === 'asc' ? 'desc' : 'asc'; else state.sort = { key: k, dir: 'asc' }; renderDashboard(); }));
+  dom.compareSearch.addEventListener('input', (e) => { state.compareSearch = e.target.value; renderComparisonTable(); }); dom.compareMovementFilter.addEventListener('change', (e) => { state.compareMovementFilter = e.target.value; renderComparisonTable(); });
+  dom.comparisonTable.querySelectorAll('th[data-csort]').forEach((th) => th.addEventListener('click', () => { const k = th.dataset.csort; if (state.csort.key === k) state.csort.dir = state.csort.dir === 'asc' ? 'desc' : 'asc'; else state.csort = { key: k, dir: 'desc' }; renderComparisonTable(); }));
 
-  dom.actions.save.addEventListener('click', () => upsertRecipe('save'));
-  dom.actions.update.addEventListener('click', () => upsertRecipe('update'));
-  dom.actions.duplicate.addEventListener('click', duplicateRecipe);
-  dom.actions.del.addEventListener('click', deleteRecipe);
-  dom.actions.reset.addEventListener('click', resetRecipeForm);
-  dom.actions.newRecipe.addEventListener('click', resetRecipeForm);
-
-  dom.recipeSearch.addEventListener('input', (e) => {
-    state.recipeSearch = e.target.value;
-    renderRecipeList();
+  dom.actions.openLib.addEventListener('click', () => dom.library.modal.classList.add('open')); dom.actions.closeLib.addEventListener('click', () => dom.library.modal.classList.remove('open')); dom.library.modal.addEventListener('click', (e) => { if (e.target.dataset.closeModal) dom.library.modal.classList.remove('open'); });
+  dom.library.search.addEventListener('input', (e) => { state.ingredientSearch = e.target.value; renderIngredientLibrary(); });
+  dom.library.add.addEventListener('click', () => {
+    const i = readIngredientForm(); if (!i.name || i.packSize <= 0 || i.purchasePrice < 0 || !PACK_UNITS.includes(i.packUnit)) return setInlineMessage(dom.library.errors, 'Valid ingredient fields are required.');
+    if (state.ingredients.some((x) => safeLower(x.name) === safeLower(i.name))) return setInlineMessage(dom.library.errors, 'Ingredient already exists.');
+    state.ingredients.push({ id: uid('ing'), ...i }); persistAll(); clearIngredientForm(); renderIngredientLibrary(); refreshRowIngredientOptions();
   });
-  dom.recipeStatusFilter.addEventListener('change', (e) => {
-    state.recipeStatusFilter = e.target.value;
-    renderRecipeList();
+  dom.library.update.addEventListener('click', () => {
+    if (!state.ingredientEditingId) return setInlineMessage(dom.library.errors, 'Select ingredient to update.'); const i = readIngredientForm();
+    state.ingredients = state.ingredients.map((x) => x.id === state.ingredientEditingId ? { ...x, ...i } : x); persistAll(); clearIngredientForm(); renderIngredientLibrary(); refreshRowIngredientOptions();
   });
-
-  [...Object.values(dom.fields)].forEach((el) => {
-    el.addEventListener('input', recalcAndRender);
-    el.addEventListener('change', recalcAndRender);
-  });
-
-  dom.analysisSearch.addEventListener('input', (e) => {
-    state.analysisSearch = e.target.value;
-    renderDashboard();
-  });
-  dom.analysisClassFilter.addEventListener('change', (e) => {
-    state.analysisClassFilter = e.target.value;
-    renderDashboard();
-  });
-
-  dom.analysisTable.querySelectorAll('th[data-sort]').forEach((th) => {
-    th.addEventListener('click', () => {
-      const key = th.dataset.sort;
-      if (state.sort.key === key) state.sort.dir = state.sort.dir === 'asc' ? 'desc' : 'asc';
-      else state.sort = { key, dir: 'asc' };
-      renderDashboard();
-    });
-  });
-
-  dom.actions.openLib.addEventListener('click', () => dom.library.modal.classList.add('open'));
-  dom.actions.closeLib.addEventListener('click', () => dom.library.modal.classList.remove('open'));
-  dom.library.modal.addEventListener('click', (e) => {
-    if (e.target.dataset.closeModal) dom.library.modal.classList.remove('open');
-  });
-
-  dom.library.search.addEventListener('input', (e) => {
-    state.ingredientSearch = e.target.value;
-    renderIngredientLibrary();
-  });
-  dom.library.add.addEventListener('click', onAddIngredient);
-  dom.library.update.addEventListener('click', onUpdateIngredient);
   dom.library.clear.addEventListener('click', clearIngredientForm);
-  dom.library.body.addEventListener('click', onIngredientTableClick);
+  dom.library.body.addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-action]'); if (!btn) return; const ing = state.ingredients.find((x) => x.id === btn.dataset.id); if (!ing) return;
+    if (btn.dataset.action === 'edit') { state.ingredientEditingId = ing.id; dom.library.name.value = ing.name; dom.library.price.value = ing.purchasePrice; dom.library.packSize.value = ing.packSize; dom.library.packUnit.value = ing.packUnit; dom.library.supplier.value = ing.supplier; dom.library.notes.value = ing.notes; return; }
+    if (window.confirm(`Delete ingredient "${ing.name}"?`)) { state.ingredients = state.ingredients.filter((x) => x.id !== ing.id); persistAll(); renderIngredientLibrary(); refreshRowIngredientOptions(); }
+  });
+
+  dom.actions.createSnapshot.addEventListener('click', createSnapshot); dom.actions.runCompare.addEventListener('click', runComparison); dom.actions.clearCompare.addEventListener('click', clearComparison);
+  dom.actions.exportCurrentCsv.addEventListener('click', exportCurrentCsv); dom.actions.exportCompareCsv.addEventListener('click', exportComparisonCsv);
+  dom.actions.printSummary.addEventListener('click', () => window.print());
+  dom.actions.copySummary.addEventListener('click', async () => { try { await navigator.clipboard.writeText(reviewSummaryText()); setInlineMessage(dom.snapshotFeedback, 'Summary copied to clipboard.', 'success'); } catch { setInlineMessage(dom.snapshotFeedback, 'Clipboard not available in this browser context.'); } });
+
+  dom.snapshotList.addEventListener('click', (e) => {
+    const viewBtn = e.target.closest('button[data-snapshot-view]'); const delBtn = e.target.closest('button[data-snapshot-delete]');
+    if (viewBtn) { const snap = state.snapshots.find((s) => s.id === viewBtn.dataset.snapshotView); if (!snap) return; state.comparison = { ...comparePeriods(snap.items, findPeriodBySelector('live').items), leftLabel: `${snap.name} (${snap.periodLabel})`, rightLabel: 'Current Live', notes: '' }; renderDashboard(); return; }
+    if (delBtn) { const snap = state.snapshots.find((s) => s.id === delBtn.dataset.snapshotDelete); if (!snap) return; if (!window.confirm(`Delete snapshot "${snap.name}"?`)) return; state.snapshots = state.snapshots.filter((s) => s.id !== snap.id); persistAll(); renderSnapshotSelectors(); renderSnapshotList(); setInlineMessage(dom.snapshotFeedback, 'Snapshot deleted.', 'success'); }
+  });
 }
 
-/* ==============================
-   Init
-================================ */
 function init() {
-  loadData();
-  bindEvents();
-  renderIngredientLibrary();
-
-  if (state.draft) {
-    state.activeRecipeId = state.draft.id || null;
-    setRecipeToForm(state.draft);
-  } else if (state.recipes[0]) {
-    state.activeRecipeId = state.recipes[0].id;
-    setRecipeToForm(state.recipes[0]);
-  } else {
-    resetRecipeForm();
-  }
-
-  renderRecipeList();
-  renderDashboard();
-  recalcAndRender();
+  loadData(); bindEvents(); renderIngredientLibrary(); renderSnapshotSelectors();
+  if (state.draft) { state.activeRecipeId = state.draft.id || null; setRecipeToForm(state.draft); }
+  else if (state.recipes[0]) { state.activeRecipeId = state.recipes[0].id; setRecipeToForm(state.recipes[0]); }
+  else resetRecipeForm();
+  dom.comparisonNotes.value = state.comparisonNotes || '';
+  renderRecipeList(); renderDashboard(); recalcAndRender();
 }
-
 init();

@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Menu Price Engine — Stage 3</title>
+    <title>Menu Price Engine — Stage 4</title>
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
@@ -11,44 +11,48 @@
       <header class="app-header card">
         <div>
           <h1>Menu Price Engine</h1>
-          <p>Kiju internal costing + menu engineering dashboard · Stage 3</p>
+          <p>Kiju internal costing, menu engineering, reporting + review workflow · Stage 4</p>
         </div>
         <div class="header-actions">
+          <span id="mode-indicator" class="count-pill">Mode: Live</span>
           <button id="open-library-btn" class="btn btn-accent" type="button">Open Ingredient Library</button>
           <button id="new-recipe-btn" class="btn btn-secondary" type="button">New Recipe</button>
         </div>
       </header>
 
+      <section class="card dashboard-block">
+        <div class="panel-head"><h2>Reporting Controls</h2></div>
+        <div class="report-toolbar">
+          <label class="field"><span>Snapshot Name *</span><input id="snapshot-name" type="text" placeholder="e.g. April 2026 Review" /></label>
+          <label class="field"><span>Period Label</span><input id="snapshot-period" type="text" placeholder="e.g. Last 30 Days" /></label>
+          <label class="field field-grow"><span>Snapshot Notes</span><input id="snapshot-notes" type="text" placeholder="Optional review notes" /></label>
+          <button id="create-snapshot-btn" class="btn btn-accent" type="button">Create Snapshot</button>
+        </div>
+        <div class="report-toolbar two">
+          <label class="field"><span>Compare From</span><select id="compare-left"></select></label>
+          <label class="field"><span>Compare To</span><select id="compare-right"></select></label>
+          <label class="field field-grow"><span>Comparison Notes</span><input id="comparison-notes" type="text" placeholder="Internal notes for this review" /></label>
+          <button id="run-compare-btn" class="btn" type="button">Run Comparison</button>
+          <button id="clear-compare-btn" class="btn btn-secondary" type="button">Clear</button>
+          <button id="export-current-csv-btn" class="btn" type="button">Export Current CSV</button>
+          <button id="export-compare-csv-btn" class="btn" type="button">Export Comparison CSV</button>
+          <button id="print-summary-btn" class="btn" type="button">Print Review Summary</button>
+          <button id="copy-summary-btn" class="btn" type="button">Copy Text Summary</button>
+        </div>
+        <div id="snapshot-feedback" class="inline-errors" aria-live="polite"></div>
+      </section>
+
       <main class="workspace-grid">
         <aside class="panel card" aria-label="Saved menu items">
-          <div class="panel-head">
-            <h2>Saved Menu Items</h2>
-            <span id="recipe-count" class="count-pill">0</span>
-          </div>
-          <label class="field">
-            <span>Search recipes</span>
-            <input id="recipe-search" type="search" placeholder="Search by name" />
-          </label>
-          <label class="field">
-            <span>Status filter</span>
-            <select id="recipe-status-filter">
-              <option value="all">All</option>
-              <option value="active">Active only</option>
-              <option value="inactive">Inactive only</option>
-            </select>
-          </label>
-          <p class="helper-text">Select a recipe to edit costing and performance data.</p>
+          <div class="panel-head"><h2>Saved Menu Items</h2><span id="recipe-count" class="count-pill">0</span></div>
+          <label class="field"><span>Search recipes</span><input id="recipe-search" type="search" placeholder="Search by name" /></label>
+          <label class="field"><span>Status filter</span><select id="recipe-status-filter"><option value="all">All</option><option value="active">Active only</option><option value="inactive">Inactive only</option></select></label>
           <ul id="recipe-list" class="recipe-list"></ul>
         </aside>
 
         <section class="panel card" aria-label="Recipe editor">
-          <div class="panel-head">
-            <h2>Recipe Editor</h2>
-            <span id="draft-state" class="meta-text">Draft autosave enabled</span>
-          </div>
+          <div class="panel-head"><h2>Recipe Editor</h2><span id="draft-state" class="meta-text">Draft autosave enabled</span></div>
           <div id="editor-errors" class="inline-errors" aria-live="polite"></div>
-
-          <div class="section-head"><h3>Costing Inputs</h3></div>
           <div class="field-grid two-col">
             <label class="field"><span>Recipe Name *</span><input id="recipe-name" type="text" /></label>
             <label class="field"><span>Category</span><input id="recipe-category" type="text" /></label>
@@ -58,256 +62,61 @@
             <label class="field"><span>Labour Cost / Portion (£)</span><input id="labour-cost" type="number" min="0" step="0.01" value="0" /></label>
             <label class="field"><span>VAT Rate %</span><input id="vat-rate" type="number" min="0" step="0.01" value="20" /></label>
             <label class="field"><span>Delivery Commission %</span><input id="delivery-commission" type="number" min="0" step="0.01" value="30" /></label>
-            <label class="field">
-              <span>Rounding Rule</span>
-              <select id="rounding-rule">
-                <option value="0.1">Nearest 0.10</option>
-                <option value="0.25">Nearest 0.25</option>
-                <option value="0.5">Nearest 0.50</option>
-                <option value="1">Nearest 1.00</option>
-              </select>
-            </label>
-            <label class="field"><span>Manual Menu Price (£)</span><input id="manual-price" type="number" min="0" step="0.01" placeholder="Optional" /></label>
-          </div>
-
-          <div class="section-head with-action">
-            <h3>Performance Inputs (Stage 3)</h3>
-          </div>
-          <div class="field-grid two-col">
+            <label class="field"><span>Rounding Rule</span><select id="rounding-rule"><option value="0.1">Nearest 0.10</option><option value="0.25">Nearest 0.25</option><option value="0.5">Nearest 0.50</option><option value="1">Nearest 1.00</option></select></label>
+            <label class="field"><span>Manual Menu Price (£)</span><input id="manual-price" type="number" min="0" step="0.01" /></label>
             <label class="field"><span>Current Selling Price (£) *</span><input id="selling-price" type="number" min="0" step="0.01" /></label>
-            <label class="field"><span>Units Sold (period) *</span><input id="units-sold" type="number" min="0" step="1" value="0" /></label>
+            <label class="field"><span>Units Sold *</span><input id="units-sold" type="number" min="0" step="1" value="0" /></label>
             <label class="field"><span>Reporting Period</span><input id="reporting-period" type="text" placeholder="e.g. Last 30 Days" /></label>
             <label class="field"><span>Internal Score (0-10)</span><input id="internal-score" type="number" min="0" max="10" step="0.1" /></label>
-            <label class="field">
-              <span>Menu Status</span>
-              <select id="is-active">
-                <option value="true">Active</option>
-                <option value="false">Inactive</option>
-              </select>
-            </label>
-            <label class="field"><span>Revenue Override (£)</span><input id="revenue-override" type="number" min="0" step="0.01" placeholder="Optional" /></label>
-            <label class="field field-full"><span>Item Notes</span><input id="item-notes" type="text" placeholder="Optional internal notes" /></label>
+            <label class="field"><span>Menu Status</span><select id="is-active"><option value="true">Active</option><option value="false">Inactive</option></select></label>
+            <label class="field"><span>Revenue Override (£)</span><input id="revenue-override" type="number" min="0" step="0.01" /></label>
+            <label class="field field-full"><span>Item Notes</span><input id="item-notes" type="text" /></label>
           </div>
 
-          <div class="section-head with-action">
-            <h3>Ingredient Rows</h3>
-            <button id="add-row-btn" class="btn btn-secondary" type="button">Add Ingredient Row</button>
-          </div>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Library Ingredient</th>
-                  <th>Ingredient Name</th>
-                  <th>Price £</th>
-                  <th>Pack Size</th>
-                  <th>Pack Unit</th>
-                  <th>Amount Used</th>
-                  <th>Use Unit</th>
-                  <th>Cost Used</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody id="ingredient-rows"></tbody>
-            </table>
-          </div>
-
-          <div class="button-row">
-            <button id="save-recipe-btn" class="btn btn-accent" type="button">Save Recipe</button>
-            <button id="update-recipe-btn" class="btn" type="button">Update Recipe</button>
-            <button id="duplicate-recipe-btn" class="btn" type="button">Duplicate Recipe</button>
-            <button id="delete-recipe-btn" class="btn btn-danger" type="button">Delete Recipe</button>
-            <button id="reset-form-btn" class="btn btn-secondary" type="button">Reset Current Form</button>
-          </div>
+          <div class="section-head with-action"><h3>Ingredient Rows</h3><button id="add-row-btn" class="btn btn-secondary" type="button">Add Ingredient Row</button></div>
+          <div class="table-wrap"><table><thead><tr><th>Ingredient</th><th>Name</th><th>Price £</th><th>Pack Size</th><th>Pack Unit</th><th>Amount Used</th><th>Use Unit</th><th>Cost Used</th><th></th></tr></thead><tbody id="ingredient-rows"></tbody></table></div>
+          <div class="button-row"><button id="save-recipe-btn" class="btn btn-accent" type="button">Save</button><button id="update-recipe-btn" class="btn" type="button">Update</button><button id="duplicate-recipe-btn" class="btn" type="button">Duplicate</button><button id="delete-recipe-btn" class="btn btn-danger" type="button">Delete</button><button id="reset-form-btn" class="btn btn-secondary" type="button">Reset</button></div>
         </section>
 
         <aside class="panel card" aria-label="Results and insights">
           <div class="panel-head"><h2>Item Results</h2></div>
           <div class="results-grid">
             <div class="result-item"><span>Total ingredient cost</span><strong id="res-total-ingredient">£0.00</strong></div>
-            <div class="result-item"><span>Ingredient cost / portion</span><strong id="res-ingredient-portion">£0.00</strong></div>
             <div class="result-item"><span>Portion cost excl labour</span><strong id="res-total-portion">£0.00</strong></div>
-            <div class="result-item"><span>Portion cost incl labour</span><strong id="res-total-labour">£0.00</strong></div>
-            <div class="result-item"><span>Suggested net price</span><strong id="res-suggested-net">£0.00</strong></div>
             <div class="result-item"><span>Rounded suggestion</span><strong id="res-rounded">£0.00</strong></div>
-            <div class="result-item"><span>VAT-inclusive price</span><strong id="res-vat">£0.00</strong></div>
-            <div class="result-item"><span>Delivery-adjusted recommendation</span><strong id="res-delivery">£0.00</strong></div>
             <div class="result-item"><span>Gross profit / portion</span><strong id="res-gross">£0.00</strong></div>
             <div class="result-item"><span>Food cost %</span><strong id="res-food-rounded">0.00%</strong></div>
-            <div class="result-item"><span>Total revenue (period)</span><strong id="res-total-revenue">£0.00</strong></div>
-            <div class="result-item"><span>Total gross profit (period)</span><strong id="res-total-gross-profit">£0.00</strong></div>
+            <div class="result-item"><span>Total revenue</span><strong id="res-total-revenue">£0.00</strong></div>
+            <div class="result-item"><span>Total gross profit</span><strong id="res-total-gross-profit">£0.00</strong></div>
             <div class="result-item"><span>Classification</span><strong id="res-classification">—</strong></div>
             <div class="result-item"><span>Recommended action</span><strong id="res-action">—</strong></div>
           </div>
-          <div class="insight-card">
-            <h3>Pricing Insight</h3>
-            <ul id="insight-list"></ul>
-          </div>
-          <div class="insight-card">
-            <h3>Stage 3 Item Flags</h3>
-            <ul id="item-flag-list"></ul>
-          </div>
-          <div id="calc-warnings" class="inline-errors" aria-live="polite"></div>
+          <div class="insight-card"><h3>Pricing Insight</h3><ul id="insight-list"></ul></div>
+          <div class="insight-card"><h3>Stage 4 Item Flags</h3><ul id="item-flag-list"></ul></div>
+          <div id="calc-warnings" class="inline-errors"></div>
         </aside>
       </main>
 
-      <section class="card dashboard-block" aria-label="Menu engineering dashboard">
-        <div class="panel-head">
-          <h2>Stage 3 Menu Dashboard</h2>
-          <span id="period-label" class="meta-text">Reporting period: mixed</span>
-        </div>
-        <div id="dashboard-cards" class="dashboard-cards"></div>
-        <div class="dashboard-row">
-          <div class="card-light">
-            <h3>Operational Flags Summary</h3>
-            <ul id="bulk-flag-summary"></ul>
-          </div>
-          <div class="card-light">
-            <h3>Top 3 by Units Sold</h3>
-            <ol id="top-units-list"></ol>
-          </div>
-          <div class="card-light">
-            <h3>Top 3 by Total Gross Profit</h3>
-            <ol id="top-profit-list"></ol>
-          </div>
-          <div class="card-light">
-            <h3>Priority Insights</h3>
-            <ul id="menu-insight-list"></ul>
-          </div>
-        </div>
-      </section>
+      <section class="card dashboard-block"><div class="panel-head"><h2>Review Dashboard</h2><span id="period-label" class="meta-text">Period: mixed</span></div><div id="dashboard-cards" class="dashboard-cards"></div><div class="dashboard-row"><div class="card-light"><h3>Key Review Highlights</h3><ul id="menu-insight-list"></ul></div><div class="card-light"><h3>Action Priorities</h3><ul id="priority-list"></ul></div><div class="card-light"><h3>Snapshot Library</h3><ul id="snapshot-list"></ul></div><div class="card-light"><h3>Comparison Summary</h3><ul id="comparison-summary"></ul></div></div></section>
 
-      <section class="card dashboard-block" aria-label="Menu engineering matrix">
-        <div class="panel-head"><h2>Popularity vs Profitability Matrix</h2></div>
-        <div id="matrix-fallback" class="helper-text"></div>
-        <div id="matrix-chart" class="matrix-chart" role="img" aria-label="Menu engineering matrix"></div>
-      </section>
+      <section class="card dashboard-block"><div class="panel-head"><h2>Popularity vs Profitability Matrix</h2></div><div id="matrix-fallback" class="helper-text"></div><div id="matrix-chart" class="matrix-chart"></div></section>
 
-      <section class="card dashboard-block" aria-label="Menu analysis table">
+      <section class="card dashboard-block">
         <div class="panel-head"><h2>Menu Engineering Table</h2></div>
-        <div class="analysis-controls">
-          <label class="field"><span>Search items</span><input id="analysis-search" type="search" placeholder="Search by item name" /></label>
-          <label class="field">
-            <span>Classification filter</span>
-            <select id="analysis-class-filter">
-              <option value="all">All</option>
-              <option value="Star">Star</option>
-              <option value="Plowhorse">Plowhorse</option>
-              <option value="Puzzle">Puzzle</option>
-              <option value="Dog">Dog</option>
-              <option value="Inactive">Inactive</option>
-              <option value="Unclassified">Unclassified</option>
-            </select>
-          </label>
-        </div>
-        <div class="table-wrap">
-          <table id="analysis-table">
-            <thead>
-              <tr>
-                <th data-sort="name">Item</th>
-                <th data-sort="classification">Category</th>
-                <th data-sort="sellingPrice">Selling Price</th>
-                <th data-sort="portionCost">Portion Cost</th>
-                <th data-sort="grossProfitPerPortion">Gross Profit/Portion</th>
-                <th data-sort="foodCostPercent">Food Cost %</th>
-                <th data-sort="unitsSold">Units Sold</th>
-                <th data-sort="revenue">Revenue</th>
-                <th data-sort="totalGrossProfit">Total Gross Profit</th>
-                <th>Action</th>
-                <th>Flags</th>
-              </tr>
-            </thead>
-            <tbody id="analysis-body"></tbody>
-          </table>
-        </div>
+        <div class="analysis-controls"><label class="field"><span>Search</span><input id="analysis-search" type="search" /></label><label class="field"><span>Class filter</span><select id="analysis-class-filter"><option value="all">All</option><option value="Star">Star</option><option value="Plowhorse">Plowhorse</option><option value="Puzzle">Puzzle</option><option value="Dog">Dog</option><option value="Inactive">Inactive</option></select></label></div>
+        <div class="table-wrap"><table id="analysis-table"><thead><tr><th data-sort="name">Item</th><th data-sort="classification">Class</th><th data-sort="sellingPrice">Price</th><th data-sort="grossProfitPerPortion">GP/Portion</th><th data-sort="foodCostPercent">Food Cost %</th><th data-sort="unitsSold">Units</th><th data-sort="revenue">Revenue</th><th data-sort="totalGrossProfit">Total GP</th><th>Action</th></tr></thead><tbody id="analysis-body"></tbody></table></div>
+      </section>
+
+      <section class="card dashboard-block">
+        <div class="panel-head"><h2>Snapshot Comparison Table</h2></div>
+        <div class="analysis-controls"><label class="field"><span>Search Items</span><input id="compare-search" type="search" /></label><label class="field"><span>Movement</span><select id="compare-movement-filter"><option value="all">All</option><option value="improved">Improved</option><option value="worsened">Worsened</option><option value="changed">Class Changed</option></select></label></div>
+        <div class="table-wrap"><table id="comparison-table"><thead><tr><th data-csort="name">Item</th><th>Old Class</th><th>New Class</th><th data-csort="priceChange">Δ Price</th><th data-csort="unitsChange">Δ Units</th><th data-csort="revenueChange">Δ Revenue</th><th data-csort="profitChange">Δ Total GP</th><th data-csort="foodCostChange">Δ Food Cost %</th><th>Movement</th><th>Recommended Action</th></tr></thead><tbody id="comparison-body"></tbody></table></div>
       </section>
     </div>
 
-    <div id="library-modal" class="modal" aria-hidden="true">
-      <div class="modal-backdrop" data-close-modal="true"></div>
-      <div class="modal-panel card" role="dialog" aria-modal="true" aria-labelledby="library-title">
-        <div class="panel-head">
-          <h2 id="library-title">Ingredient Library</h2>
-          <button id="close-library-btn" class="btn" type="button">Close</button>
-        </div>
-        <div id="library-errors" class="inline-errors" aria-live="polite"></div>
+    <div id="library-modal" class="modal" aria-hidden="true"><div class="modal-backdrop" data-close-modal="true"></div><div class="modal-panel card"><div class="panel-head"><h2>Ingredient Library</h2><button id="close-library-btn" class="btn" type="button">Close</button></div><div id="library-errors" class="inline-errors"></div><div class="field-grid three-col"><label class="field"><span>Name *</span><input id="lib-name" type="text" /></label><label class="field"><span>Price £ *</span><input id="lib-price" type="number" min="0" step="0.01" /></label><label class="field"><span>Pack Size *</span><input id="lib-pack-size" type="number" min="0.0001" step="0.0001" /></label><label class="field"><span>Pack Unit *</span><select id="lib-pack-unit"><option value="">Select</option><option value="g">g</option><option value="kg">kg</option><option value="ml">ml</option><option value="l">l</option><option value="unit">unit</option></select></label><label class="field"><span>Supplier</span><input id="lib-supplier" type="text" /></label><label class="field"><span>Notes</span><input id="lib-notes" type="text" /></label></div><div class="button-row"><button id="add-ingredient-btn" class="btn btn-accent" type="button">Add</button><button id="update-ingredient-btn" class="btn" type="button">Update</button><button id="clear-ingredient-form-btn" class="btn btn-secondary" type="button">Clear</button><span id="ingredient-count" class="count-pill">0</span></div><label class="field"><span>Search</span><input id="ingredient-search" type="search" /></label><div class="table-wrap"><table><thead><tr><th>Name</th><th>Price</th><th>Pack</th><th>Supplier</th><th>Notes</th><th>Used</th><th>Actions</th></tr></thead><tbody id="ingredient-library-body"></tbody></table></div></div></div>
 
-        <div class="field-grid three-col">
-          <label class="field"><span>Name *</span><input id="lib-name" type="text" /></label>
-          <label class="field"><span>Purchase Price (£) *</span><input id="lib-price" type="number" min="0" step="0.01" /></label>
-          <label class="field"><span>Pack Size *</span><input id="lib-pack-size" type="number" min="0.0001" step="0.0001" /></label>
-          <label class="field">
-            <span>Pack Unit *</span>
-            <select id="lib-pack-unit">
-              <option value="">Select unit</option>
-              <option value="g">g</option>
-              <option value="kg">kg</option>
-              <option value="ml">ml</option>
-              <option value="l">l</option>
-              <option value="unit">unit</option>
-            </select>
-          </label>
-          <label class="field"><span>Supplier</span><input id="lib-supplier" type="text" /></label>
-          <label class="field"><span>Notes</span><input id="lib-notes" type="text" /></label>
-        </div>
-
-        <div class="button-row">
-          <button id="add-ingredient-btn" class="btn btn-accent" type="button">Add Ingredient</button>
-          <button id="update-ingredient-btn" class="btn" type="button">Update Ingredient</button>
-          <button id="clear-ingredient-form-btn" class="btn btn-secondary" type="button">Clear Form</button>
-          <span id="ingredient-count" class="count-pill">0</span>
-        </div>
-
-        <label class="field"><span>Search Ingredients</span><input id="ingredient-search" type="search" /></label>
-
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Price £</th>
-                <th>Pack</th>
-                <th>Supplier</th>
-                <th>Notes</th>
-                <th>Used in recipes</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody id="ingredient-library-body"></tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-
-    <template id="ingredient-row-template">
-      <tr>
-        <td><select class="row-lib-select"></select></td>
-        <td><input class="row-name" type="text" /></td>
-        <td><input class="row-price" type="number" min="0" step="0.0001" /></td>
-        <td><input class="row-pack-size" type="number" min="0.0001" step="0.0001" /></td>
-        <td>
-          <select class="row-pack-unit">
-            <option value="g">g</option>
-            <option value="kg">kg</option>
-            <option value="ml">ml</option>
-            <option value="l">l</option>
-            <option value="unit">unit</option>
-          </select>
-        </td>
-        <td><input class="row-amount" type="number" min="0" step="0.0001" /></td>
-        <td>
-          <select class="row-use-unit">
-            <option value="g">g</option>
-            <option value="kg">kg</option>
-            <option value="ml">ml</option>
-            <option value="l">l</option>
-            <option value="unit">unit</option>
-          </select>
-        </td>
-        <td><span class="row-cost">£0.00</span></td>
-        <td><button type="button" class="btn btn-danger btn-icon row-remove">✕</button></td>
-      </tr>
-    </template>
+    <template id="ingredient-row-template"><tr><td><select class="row-lib-select"></select></td><td><input class="row-name" type="text" /></td><td><input class="row-price" type="number" min="0" step="0.0001" /></td><td><input class="row-pack-size" type="number" min="0.0001" step="0.0001" /></td><td><select class="row-pack-unit"><option value="g">g</option><option value="kg">kg</option><option value="ml">ml</option><option value="l">l</option><option value="unit">unit</option></select></td><td><input class="row-amount" type="number" min="0" step="0.0001" /></td><td><select class="row-use-unit"><option value="g">g</option><option value="kg">kg</option><option value="ml">ml</option><option value="l">l</option><option value="unit">unit</option></select></td><td><span class="row-cost">£0.00</span></td><td><button type="button" class="btn btn-danger btn-icon row-remove">✕</button></td></tr></template>
 
     <script src="script.js"></script>
   </body>
