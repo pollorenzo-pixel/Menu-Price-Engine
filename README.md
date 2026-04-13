@@ -9,7 +9,9 @@ The app uses a strict three-level structure:
 1. **Ingredients** = what you buy
    - Raw purchased supplier items only.
    - Contains purchase price, pack size/unit, supplier, and notes.
-   - Ingredient Library view is grouped by supplier (accordion sections) with a dedicated **No Supplier** group for unassigned items, plus search/filter controls.
+   - Ingredient Library view is grouped by supplier with clear accordion sections and a dedicated **Unassigned supplier** group for items missing supplier attribution.
+   - Supplier headers are visually distinct from ingredient rows for faster scanning.
+   - Search + supplier filtering can be combined, with quick **Clear filters** behavior.
 
 2. **Recipes** = what you prep
    - Prepared components (sauces, dressings, cooked proteins, toppings, etc.).
@@ -76,6 +78,7 @@ The mobile layout is optimized for clarity:
 - Navigation switches to horizontal scroll chips on narrower screens.
 - Form grids collapse to single-column.
 - Header and action rows wrap cleanly.
+- Ingredient actions use larger tap targets and stack into full-width controls.
 
 ## Deployment constraints
 
