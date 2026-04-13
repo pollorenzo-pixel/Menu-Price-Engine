@@ -1,74 +1,80 @@
-# Menu Price Engine (Refactored Model)
+# Menu Price Engine (Ingredients / Recipes / Dishes Model)
 
 Menu Price Engine is a **static-file-only** app (GitHub Pages compatible) for costing and menu decision support.
 
-## Core model (now corrected)
+## Core model
 
-The app now separates three entities clearly:
+The app uses a strict three-level structure:
 
 1. **Ingredients** = what you buy
    - Raw purchased supplier items only.
-   - Stored with purchase price, pack size/unit, supplier, and notes.
+   - Contains purchase price, pack size/unit, supplier, and notes.
 
 2. **Recipes** = what you prep
    - Prepared components (sauces, dressings, cooked proteins, toppings, etc.).
    - Production costing only.
-   - Recipe output metrics are:
+   - Recipe metrics are limited to:
      - total batch cost
      - cost per yield unit
+   - Recipe forms intentionally do **not** contain selling/commercial fields.
 
 3. **Dishes** = what you sell
    - Customer-facing menu items.
    - Can use:
      - raw ingredients directly,
      - recipes/components,
-     - or both.
-   - Commercial fields live here (pricing, sales, reporting, and menu-engineering analysis).
+     - or both in the same dish.
+   - Commercial fields live only here:
+     - target food cost %
+     - packaging per portion
+     - VAT
+     - delivery commission
+     - rounding rule
+     - selling price / manual override
+     - units sold / reporting period
 
-## What moved out of Recipes
+## Navigation and workflow clarity
 
-Dish/commercial fields were removed from recipe editing and moved to the Dish model:
-- target food cost %
-- packaging cost
-- VAT rate
-- delivery commission
-- rounding rule
-- suggested / rounded selling prices (calculated)
-- current selling price
-- manual override
-- units sold
-- reporting period
-- menu-engineering classification inputs
-- weekly review focus fields
+Top navigation is organized by workflow order:
 
-## Migration from old mixed model
+1) Ingredients → 2) Recipes → 3) Dishes → 4) Analysis → 5) Reports → 6) Weekly Review
 
-A safe best-effort migration runs automatically on load:
+- Home highlights dish-level KPIs and actions.
+- Quick-jump buttons are included to reduce context switching confusion.
 
-- Reads legacy keys (`mpe_v4_*`) if new keys (`mpe_v5_*`) do not exist.
-- Legacy recipe objects are inspected.
-- If an old recipe contains commercial menu fields (e.g. selling price, units sold, target food cost, packaging), it is migrated to a **Dish**.
-- If it does not, it is retained as a **Recipe**.
-- Ingredient costing rows are preserved as component/input rows where possible.
-- Migration is non-destructive and designed to avoid crashes if old data is incomplete.
+## Dishes-only commercial surfaces
 
-## Information architecture / navigation
+The following sections all run on **Dishes**:
 
-Modes are now explicit:
 - Home
-- Ingredients
-- Recipes
-- Dishes
 - Menu Analysis
 - Reports & Snapshots
 - Weekly Review
 
-## Stage 4 / Weekly behavior
+## Migration safety from old mixed objects
 
-- Home KPIs are **dish-level**.
-- Menu Analysis works on **dishes**.
-- Reports and snapshots operate on **dishes**.
-- Weekly Review focuses on **dishes** and their recommended actions.
+A safe best-effort migration runs on load:
+
+- If v5 keys are missing, legacy v4 keys are read.
+- Legacy mixed recipe objects are inspected.
+- Legacy objects with commercial menu fields are migrated to **Dish** records.
+- Legacy production-only objects remain **Recipe** records.
+- Ingredient rows are preserved as component/input rows where possible.
+
+Additional safety pass:
+
+- If existing v5 recipe data still contains legacy commercial fields (mixed objects), those entries are split safely:
+  - converted to Dishes,
+  - removed from Recipes,
+  - normalized and persisted.
+
+## Mobile layout
+
+The mobile layout is optimized for clarity:
+
+- Navigation switches to horizontal scroll chips on narrower screens.
+- Form grids collapse to single-column.
+- Header and action rows wrap cleanly.
 
 ## Deployment constraints
 

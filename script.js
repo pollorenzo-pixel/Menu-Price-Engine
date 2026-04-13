@@ -56,6 +56,75 @@ function convertUnit(value, from, to) {
   return { ok: true, value: (n(value) * UNIT_FACTOR[from]) / UNIT_FACTOR[to] };
 }
 
+function normalizeIngredient(raw = {}) {
+  return {
+    id: t(raw.id) || uid('ing'),
+    name: t(raw.name),
+    purchasePrice: Math.max(0, n(raw.purchasePrice, raw.price)),
+    packSize: Math.max(0.0001, n(raw.packSize, 1)),
+    packUnit: UNITS.includes(raw.packUnit) ? raw.packUnit : 'g',
+    supplier: t(raw.supplier),
+    notes: t(raw.notes),
+    createdAt: t(raw.createdAt) || now(),
+    updatedAt: now(),
+  };
+}
+
+function normalizeRecipe(raw = {}) {
+  const ingredientInputsRaw = Array.isArray(raw.ingredientInputs) ? raw.ingredientInputs : [];
+  return {
+    id: t(raw.id) || uid('rec'),
+    name: t(raw.name),
+    category: t(raw.category),
+    yieldQuantity: Math.max(0.01, n(raw.yieldQuantity, raw.portionsYielded, 1)),
+    yieldUnit: UNITS.includes(raw.yieldUnit) ? raw.yieldUnit : 'unit',
+    ingredientInputs: ingredientInputsRaw.map((r) => ({
+      id: t(r.id) || uid('rin'),
+      sourceId: t(r.sourceId || r.ingredientId),
+      sourceNameSnapshot: t(r.sourceNameSnapshot || r.ingredientNameSnapshot || r.name),
+      quantityUsed: Math.max(0, n(r.quantityUsed, r.amountUsed)),
+      useUnit: UNITS.includes(r.useUnit) ? r.useUnit : 'g',
+      calculatedCost: 0,
+    })).filter((r) => r.sourceId && r.quantityUsed > 0),
+    notes: t(raw.notes || raw.itemNotes),
+    totalBatchCost: 0,
+    costPerYieldUnit: 0,
+    createdAt: t(raw.createdAt) || now(),
+    updatedAt: now(),
+  };
+}
+
+function normalizeDish(raw = {}) {
+  const componentsRaw = Array.isArray(raw.components) ? raw.components : [];
+  return {
+    id: t(raw.id) || uid('dish'),
+    name: t(raw.name),
+    category: t(raw.category),
+    active: typeof raw.active === 'boolean' ? raw.active : (typeof raw.isActive === 'boolean' ? raw.isActive : true),
+    components: componentsRaw.map((c) => ({
+      id: t(c.id) || uid('cmp'),
+      sourceType: c.sourceType === 'recipe' ? 'recipe' : 'ingredient',
+      sourceId: t(c.sourceId || c.ingredientId),
+      sourceNameSnapshot: t(c.sourceNameSnapshot || c.ingredientNameSnapshot || c.name),
+      quantityUsed: Math.max(0, n(c.quantityUsed, c.amountUsed)),
+      useUnit: UNITS.includes(c.useUnit) ? c.useUnit : 'g',
+      calculatedCost: 0,
+    })).filter((c) => c.sourceId && c.quantityUsed > 0),
+    packagingCostPerPortion: Math.max(0, n(raw.packagingCostPerPortion, raw.packagingCost)),
+    targetFoodCostPercent: Math.max(0.01, n(raw.targetFoodCostPercent, raw.targetFoodCost, 30)),
+    vatRatePercent: Math.max(0, n(raw.vatRatePercent, 20)),
+    deliveryCommissionPercent: Math.max(0, n(raw.deliveryCommissionPercent, 30)),
+    roundingRule: Math.max(0.01, n(raw.roundingRule, 0.25)),
+    currentSellingPrice: Math.max(0, n(raw.currentSellingPrice, raw.sellingPrice)),
+    manualPriceOverride: Math.max(0, n(raw.manualPriceOverride, raw.manualMenuPrice, 0)) || '',
+    unitsSold: Math.max(0, Math.round(n(raw.unitsSold, 0))),
+    reportingPeriod: t(raw.reportingPeriod) || 'Last 30 Days',
+    notes: t(raw.notes || raw.itemNotes),
+    createdAt: t(raw.createdAt) || now(),
+    updatedAt: now(),
+  };
+}
+
 function rowIngredientCost(input) {
   const ing = state.ingredients.find((i) => i.id === input.sourceId);
   if (!ing) return 0;
@@ -122,30 +191,45 @@ function isLegacyDishLikeRecipe(raw) {
   return keys.some((k) => raw && raw[k] !== undefined && raw[k] !== null && raw[k] !== '');
 }
 
+function splitMixedV5Recipes(recipes) {
+  const outputRecipes = [];
+  const outputDishes = [];
+  (recipes || []).forEach((r) => {
+    if (isLegacyDishLikeRecipe(r)) {
+      const migratedComponents = (Array.isArray(r.ingredientInputs) ? r.ingredientInputs : []).map((ri) => ({
+        id: uid('cmp'),
+        sourceType: 'ingredient',
+        sourceId: t(ri.sourceId || ri.ingredientId),
+        sourceNameSnapshot: t(ri.sourceNameSnapshot || ri.ingredientNameSnapshot || ri.name),
+        quantityUsed: Math.max(0, n(ri.quantityUsed, ri.amountUsed)),
+        useUnit: UNITS.includes(ri.useUnit) ? ri.useUnit : 'g',
+        calculatedCost: 0,
+      })).filter((c) => c.sourceId && c.quantityUsed > 0);
+      outputDishes.push(normalizeDish({ ...r, id: uid('dish'), components: migratedComponents, reportingPeriod: t(r.reportingPeriod) || 'Migrated from mixed v5 recipe' }));
+    } else {
+      outputRecipes.push(normalizeRecipe(r));
+    }
+  });
+  return { outputRecipes, outputDishes };
+}
+
 function migrateLegacyData() {
-  const v5 = safeParse(STORAGE_KEYS.ingredients, null);
-  if (Array.isArray(v5)) {
-    state.ingredients = v5;
-    state.recipes = safeParse(STORAGE_KEYS.recipes, []);
-    state.dishes = safeParse(STORAGE_KEYS.dishes, []);
+  const v5Ingredients = safeParse(STORAGE_KEYS.ingredients, null);
+  if (Array.isArray(v5Ingredients)) {
+    state.ingredients = v5Ingredients.map(normalizeIngredient);
+    const v5RecipesRaw = safeParse(STORAGE_KEYS.recipes, []);
+    const split = splitMixedV5Recipes(v5RecipesRaw);
+    state.recipes = split.outputRecipes;
+    state.dishes = [...safeParse(STORAGE_KEYS.dishes, []).map(normalizeDish), ...split.outputDishes];
     state.snapshots = safeParse(STORAGE_KEYS.snapshots, []);
     state.weeklyReviews = safeParse(STORAGE_KEYS.weeklyReviews, []);
+    persist();
     return;
   }
 
   const legacyIngredients = safeParse(STORAGE_KEYS.legacyIngredients, []);
   const legacyRecipes = safeParse(STORAGE_KEYS.legacyRecipes, []);
-  state.ingredients = (legacyIngredients || []).map((i) => ({
-    id: t(i.id) || uid('ing'),
-    name: t(i.name),
-    purchasePrice: Math.max(0, n(i.purchasePrice, i.price)),
-    packSize: Math.max(0.0001, n(i.packSize, 1)),
-    packUnit: UNITS.includes(i.packUnit) ? i.packUnit : 'g',
-    supplier: t(i.supplier),
-    notes: t(i.notes),
-    createdAt: t(i.createdAt) || now(),
-    updatedAt: now(),
-  }));
+  state.ingredients = (legacyIngredients || []).map(normalizeIngredient);
 
   state.recipes = [];
   state.dishes = [];
@@ -163,39 +247,35 @@ function migrateLegacyData() {
     }));
 
     if (isLegacyDishLikeRecipe(r)) {
-      state.dishes.push({
+      state.dishes.push(normalizeDish({
         id: uid('dish'),
         name: t(r.name) || `Migrated Dish ${id}`,
         category: t(r.category),
         active: typeof r.isActive === 'boolean' ? r.isActive : true,
         components: ingredientInputs.map((ri) => ({ ...ri, sourceType: 'ingredient' })),
-        packagingCostPerPortion: Math.max(0, n(r.packagingCostPerPortion, r.packagingCost)),
-        targetFoodCostPercent: Math.max(0.01, n(r.targetFoodCostPercent, r.targetFoodCost, 30)),
-        vatRatePercent: Math.max(0, n(r.vatRatePercent, 20)),
-        deliveryCommissionPercent: Math.max(0, n(r.deliveryCommissionPercent, 30)),
-        roundingRule: Math.max(0.01, n(r.roundingRule, 0.25)),
-        currentSellingPrice: Math.max(0, n(r.currentSellingPrice, r.sellingPrice)),
+        packagingCostPerPortion: n(r.packagingCostPerPortion, r.packagingCost),
+        targetFoodCostPercent: n(r.targetFoodCostPercent, r.targetFoodCost, 30),
+        vatRatePercent: n(r.vatRatePercent, 20),
+        deliveryCommissionPercent: n(r.deliveryCommissionPercent, 30),
+        roundingRule: n(r.roundingRule, 0.25),
+        currentSellingPrice: n(r.currentSellingPrice, r.sellingPrice),
         manualPriceOverride: n(r.manualMenuPrice, 0) || '',
-        unitsSold: Math.max(0, Math.round(n(r.unitsSold, 0))),
+        unitsSold: Math.round(n(r.unitsSold, 0)),
         reportingPeriod: t(r.reportingPeriod) || 'Migrated',
         notes: t(r.itemNotes),
         createdAt: t(r.createdAt) || now(),
-        updatedAt: now(),
-      });
+      }));
     } else {
-      state.recipes.push({
+      state.recipes.push(normalizeRecipe({
         id: uid('rec'),
         name: t(r.name) || `Migrated Recipe ${id}`,
         category: t(r.category),
-        yieldQuantity: Math.max(0.01, n(r.yieldQuantity, r.portionsYielded, 1)),
+        yieldQuantity: n(r.yieldQuantity, r.portionsYielded, 1),
         yieldUnit: UNITS.includes(r.yieldUnit) ? r.yieldUnit : 'unit',
         ingredientInputs,
         notes: t(r.notes || r.itemNotes),
-        totalBatchCost: 0,
-        costPerYieldUnit: 0,
         createdAt: t(r.createdAt) || now(),
-        updatedAt: now(),
-      });
+      }));
     }
   });
 
@@ -212,7 +292,8 @@ function modeSwitch(mode) {
     p.classList.toggle('active', active);
     p.hidden = !active;
   });
-  $('mode-indicator').textContent = `Mode: ${document.querySelector(`.mode-tab[data-mode="${mode}"]`).textContent}`;
+  const activeLabel = document.querySelector(`.mode-tab[data-mode="${mode}"]`)?.textContent || mode;
+  $('mode-indicator').textContent = `Mode: ${activeLabel}`;
 }
 
 function renderIngredients() {
@@ -246,7 +327,7 @@ function readRecipeForm() {
     calculatedCost: n(tr.querySelector('.cost').dataset.value, 0),
   })).filter((r) => r.sourceId && r.quantityUsed > 0);
 
-  return {
+  return normalizeRecipe({
     id: state.editRecipeId || uid('rec'),
     name: t($('rec-name').value),
     category: t($('rec-category').value),
@@ -254,11 +335,8 @@ function readRecipeForm() {
     yieldUnit: $('rec-yield-unit').value,
     ingredientInputs,
     notes: t($('rec-notes').value),
-    totalBatchCost: 0,
-    costPerYieldUnit: 0,
     createdAt: state.editRecipeId ? state.recipes.find((r) => r.id === state.editRecipeId)?.createdAt || now() : now(),
-    updatedAt: now(),
-  };
+  });
 }
 
 function renderRecipeMetrics() {
@@ -300,6 +378,22 @@ function fillDishSourceOptions(row) {
   const items = type === 'ingredient' ? state.ingredients : state.recipes;
   sel.innerHTML = '<option value="">Select source</option>' + items.map((i) => `<option value="${i.id}">${i.name}</option>`).join('');
 }
+
+function syncDishRowUnitToSource(row) {
+  const type = row.querySelector('.src-type').value;
+  const sourceId = row.querySelector('.src-id').value;
+  const unitSel = row.querySelector('.unit');
+  if (!sourceId) return;
+
+  const source = type === 'ingredient'
+    ? state.ingredients.find((i) => i.id === sourceId)
+    : state.recipes.find((r) => r.id === sourceId);
+
+  if (!source) return;
+  const preferred = type === 'ingredient' ? source.packUnit : source.yieldUnit;
+  if (UNITS.includes(preferred)) unitSel.value = preferred;
+}
+
 function addDishRow(data = null) {
   const row = $('dish-row-template').content.firstElementChild.cloneNode(true);
   if (data?.sourceType) row.querySelector('.src-type').value = data.sourceType;
@@ -309,7 +403,16 @@ function addDishRow(data = null) {
     row.querySelector('.qty').value = data.quantityUsed;
     row.querySelector('.unit').value = data.useUnit;
   }
-  row.querySelector('.src-type').addEventListener('change', () => { fillDishSourceOptions(row); renderDishMetrics(); });
+
+  row.querySelector('.src-type').addEventListener('change', () => {
+    fillDishSourceOptions(row);
+    row.querySelector('.src-id').value = '';
+    renderDishMetrics();
+  });
+  row.querySelector('.src-id').addEventListener('change', () => {
+    syncDishRowUnitToSource(row);
+    renderDishMetrics();
+  });
   row.querySelector('.remove').addEventListener('click', () => { row.remove(); renderDishMetrics(); });
   row.querySelectorAll('select,input').forEach((el) => el.addEventListener('input', renderDishMetrics));
   $('dish-rows').appendChild(row);
@@ -331,7 +434,7 @@ function readDishForm() {
     };
   }).filter((c) => c.sourceId && c.quantityUsed > 0);
 
-  return {
+  return normalizeDish({
     id: state.editDishId || uid('dish'),
     name: t($('dish-name').value),
     category: t($('dish-category').value),
@@ -348,8 +451,7 @@ function readDishForm() {
     reportingPeriod: t($('dish-period').value) || 'Last 30 Days',
     notes: t($('dish-notes').value),
     createdAt: state.editDishId ? state.dishes.find((d) => d.id === state.editDishId)?.createdAt || now() : now(),
-    updatedAt: now(),
-  };
+  });
 }
 
 function renderDishMetrics() {
@@ -477,8 +579,14 @@ function bindEvents() {
     modeSwitch(tab.dataset.mode);
   });
 
+  document.body.addEventListener('click', (e) => {
+    const jump = e.target.closest('[data-jump]');
+    if (!jump) return;
+    modeSwitch(jump.dataset.jump);
+  });
+
   $('ing-save').addEventListener('click', () => {
-    const ingredient = {
+    const ingredient = normalizeIngredient({
       id: state.editIngredientId || uid('ing'),
       name: t($('ing-name').value),
       purchasePrice: Math.max(0, n($('ing-price').value, 0)),
@@ -487,8 +595,7 @@ function bindEvents() {
       supplier: t($('ing-supplier').value),
       notes: t($('ing-notes').value),
       createdAt: state.editIngredientId ? state.ingredients.find((i) => i.id === state.editIngredientId)?.createdAt || now() : now(),
-      updatedAt: now(),
-    };
+    });
     if (!ingredient.name) return;
     if (state.editIngredientId) state.ingredients = state.ingredients.map((i) => i.id === state.editIngredientId ? ingredient : i);
     else state.ingredients.push(ingredient);
