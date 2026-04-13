@@ -27,7 +27,7 @@ const state = {
   compareSearch: '', compareMovementFilter: 'all',
   sort: { key: 'name', dir: 'asc' }, csort: { key: 'revenueChange', dir: 'desc' },
   prefs: { foodCostFlagTarget: 32, lowUnitsThreshold: 25 },
-  menuEngine: null, comparison: null,
+  menuEngine: null, comparison: null, currentMode: 'home',
   weeklyReviews: [], weeklyReview: { step: 1, started: false, name: '', notes: '', snapshotId: '', focusItemIds: [], decisions: [], comparisonNotes: '', improvedNote: '', declinedNote: '', previousEvaluation: [] },
 };
 
@@ -40,6 +40,9 @@ const dom = {
   ingredientRows: $('ingredient-rows'), template: $('ingredient-row-template'),
   editorErrors: $('editor-errors'), calcWarnings: $('calc-warnings'), draftState: $('draft-state'),
   insightList: $('insight-list'), itemFlagList: $('item-flag-list'), periodLabel: $('period-label'), modeIndicator: $('mode-indicator'),
+  modeTabs: [...document.querySelectorAll('[data-mode]')], modePanels: [...document.querySelectorAll('[data-mode-panel]')], modeJumpButtons: [...document.querySelectorAll('[data-open-mode]')],
+  activeModeTitle: $('active-mode-title'), activeModeDescription: $('active-mode-description'),
+  homeKpiCards: $('home-kpi-cards'), homeAttentionList: $('home-attention-list'), homeSummaryList: $('home-summary-list'),
   analysisSearch: $('analysis-search'), analysisClassFilter: $('analysis-class-filter'), analysisTable: $('analysis-table'), analysisBody: $('analysis-body'),
   dashboardCards: $('dashboard-cards'), menuInsightList: $('menu-insight-list'), priorityList: $('priority-list'), snapshotList: $('snapshot-list'), comparisonSummary: $('comparison-summary'),
   reviewSummaryOutput: $('review-summary-output'),
@@ -80,6 +83,25 @@ const dom = {
     add: $('add-ingredient-btn'), update: $('update-ingredient-btn'), clear: $('clear-ingredient-form-btn'),
   },
 };
+
+
+const MODE_META = {
+  home: { title: 'Home / Command Center', description: 'Track key menu performance and choose your next action.' },
+  recipes: { title: 'Recipes & Costing', description: 'Build recipes, update ingredient rows, and manage pricing calculations.' },
+  analysis: { title: 'Menu Analysis', description: 'Review classifications, matrix position, and recommended actions.' },
+  reports: { title: 'Reports & Snapshots', description: 'Create snapshots, compare periods, and export summary reporting.' },
+  weekly: { title: 'Weekly Review', description: 'Run the guided weekly ritual and capture decisions.' },
+  ingredients: { title: 'Ingredient Library', description: 'Manage ingredient costs and supplier details in one place.' },
+};
+
+function switchMode(mode) {
+  if (!MODE_META[mode]) return;
+  state.currentMode = mode;
+  dom.modeTabs.forEach((tab) => tab.classList.toggle('active', tab.dataset.mode === mode));
+  dom.modePanels.forEach((panel) => panel.classList.toggle('active', panel.dataset.modePanel === mode));
+  dom.activeModeTitle.textContent = MODE_META[mode].title;
+  dom.activeModeDescription.textContent = MODE_META[mode].description;
+}
 
 function setInlineMessage(el, message, type = 'warn') { el.textContent = message || ''; el.classList.toggle('success', type === 'success'); }
 function safeParse(raw, fallback) { try { const v = JSON.parse(raw); return v ?? fallback; } catch { return fallback; } }
@@ -434,6 +456,31 @@ function renderDashboard() {
   })).sort((a, b) => b.score - a.score).slice(0, 12);
   dom.priorityList.innerHTML = priorities.length ? priorities.map((p) => `<li><strong>${p.name}</strong> — ${p.flag} <span class="movement-chip">${p.severity} · ${p.score}</span><br/><span class="helper-text">${p.action}</span></li>`).join('') : '<li class="empty-state">No priority flags right now.</li>';
 
+  const latestSnapshot = state.snapshots.slice().sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))[0];
+  const weeklyStatus = state.weeklyReviews[0] ? `Last completed: ${state.weeklyReviews[0].name} (${shortDateTime(state.weeklyReviews[0].createdAt)})` : 'Weekly review not completed yet';
+  const attentionRows = [
+    `${highFoodCost.length} item(s) above target food cost`,
+    `${lowPrice.length} item(s) priced below recommendation`,
+    `${items.filter((i) => i.grossProfitPerPortion <= 0.15).length} item(s) with weak margin`,
+    `${state.comparison?.summary?.changedClasses ?? 0} recent classification downgrades/changes`,
+    state.weeklyReviews.length ? 'Weekly review completed' : 'Weekly review not completed',
+  ];
+  dom.homeKpiCards.innerHTML = [
+    ['Active menu items', totals.activeItems],
+    ['Total revenue', fmtCurrency(totals.totalRevenue)],
+    ['Total gross profit', fmtCurrency(totals.totalGrossProfit)],
+    ['Average food cost %', fmtPercent(totals.avgFoodCostPercent)],
+    ['Items needing review', items.filter((i) => i.flags.length).length],
+    ['Latest snapshot period', latestSnapshot ? latestSnapshot.periodLabel : 'No snapshot'],
+    ['Weekly review status', state.weeklyReviews[0] ? 'Completed' : 'Pending'],
+  ].map(([k, v]) => `<div class="metric-card"><span>${k}</span><strong>${v}</strong></div>`).join('');
+  dom.homeAttentionList.innerHTML = attentionRows.map((x) => `<li>${x}</li>`).join('');
+  dom.homeSummaryList.innerHTML = [
+    latestSnapshot ? `Latest snapshot: ${latestSnapshot.name} (${latestSnapshot.periodLabel})` : 'No snapshots yet. Create your first snapshot in Reports.',
+    state.comparison ? `Current comparison: ${state.comparison.leftLabel} → ${state.comparison.rightLabel}` : 'No comparison currently selected.',
+    weeklyStatus,
+  ].map((x) => `<li>${x}</li>`).join('');
+
   renderAnalysisTable(items);
   renderMatrix(items);
   renderSnapshotList();
@@ -782,7 +829,8 @@ function bindEvents() {
   dom.compareSearch.addEventListener('input', (e) => { state.compareSearch = e.target.value; renderComparisonTable(); }); dom.compareMovementFilter.addEventListener('change', (e) => { state.compareMovementFilter = e.target.value; renderComparisonTable(); });
   dom.comparisonTable.querySelectorAll('th[data-csort]').forEach((th) => th.addEventListener('click', () => { const k = th.dataset.csort; if (state.csort.key === k) state.csort.dir = state.csort.dir === 'asc' ? 'desc' : 'asc'; else state.csort = { key: k, dir: 'desc' }; renderComparisonTable(); }));
 
-  dom.actions.openLib.addEventListener('click', () => dom.library.modal.classList.add('open')); dom.actions.closeLib.addEventListener('click', () => dom.library.modal.classList.remove('open')); dom.library.modal.addEventListener('click', (e) => { if (e.target.dataset.closeModal) dom.library.modal.classList.remove('open'); });
+  dom.actions.openLib.addEventListener('click', () => switchMode('ingredients'));
+  dom.actions.closeLib.addEventListener('click', () => switchMode('home'));
   dom.library.search.addEventListener('input', (e) => { state.ingredientSearch = e.target.value; renderIngredientLibrary(); });
   dom.library.add.addEventListener('click', () => {
     const i = readIngredientForm(); if (!i.name || i.packSize <= 0 || i.purchasePrice < 0 || !PACK_UNITS.includes(i.packUnit)) return setInlineMessage(dom.library.errors, 'Valid ingredient fields are required.');
@@ -901,5 +949,6 @@ function init() {
   else resetRecipeForm();
   dom.comparisonNotes.value = state.comparisonNotes || '';
   renderRecipeList(); renderDashboard(); recalcAndRender(); renderWeeklyReview();
+  switchMode('home');
 }
 init();
