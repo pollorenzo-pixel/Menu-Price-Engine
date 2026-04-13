@@ -13,6 +13,29 @@ const STORAGE_KEYS = {
 const UNITS = ['g', 'kg', 'ml', 'l', 'unit'];
 const UNIT_GROUP = { g: 'w', kg: 'w', ml: 'v', l: 'v', unit: 'c' };
 const UNIT_FACTOR = { g: 1, kg: 1000, ml: 1, l: 1000, unit: 1 };
+const PRICING_STRATEGIES = ['Standard', 'Market-Based', 'Margin Driver', 'Traffic Builder', 'Premium Signature'];
+const LABOUR_OPTIONS = ['Low', 'Medium', 'High'];
+const VALUE_OPTIONS = ['Low', 'Medium', 'High'];
+const MENU_ROLES = ['Core Main', 'Side / Add-On', 'Signature Item', 'Combo Driver', 'Traffic Builder', 'High Margin Support'];
+
+const STRATEGY_CONFIG = {
+  Standard: { formula: 0.62, market: 0.18, strategic: 0.20, protectFormula: true, useMarketFloor: false, internalFloorFactor: 1.0 },
+  'Market-Based': { formula: 0.40, market: 0.42, strategic: 0.18, protectFormula: false, useMarketFloor: true, internalFloorFactor: 1.0 },
+  'Margin Driver': { formula: 0.38, market: 0.20, strategic: 0.42, protectFormula: true, useMarketFloor: true, internalFloorFactor: 1.15 },
+  'Traffic Builder': { formula: 0.52, market: 0.26, strategic: 0.22, protectFormula: false, useMarketFloor: false, internalFloorFactor: 0.98 },
+  'Premium Signature': { formula: 0.34, market: 0.30, strategic: 0.36, protectFormula: true, useMarketFloor: true, internalFloorFactor: 1.12 },
+};
+
+const LABOUR_UPLIFT = { Low: 0, Medium: 0.05, High: 0.12 };
+const VALUE_UPLIFT = { Low: 0, Medium: 0.04, High: 0.10 };
+const ROLE_UPLIFT = {
+  'Core Main': 0.03,
+  'Side / Add-On': 0.05,
+  'Signature Item': 0.08,
+  'Combo Driver': 0.02,
+  'Traffic Builder': 0,
+  'High Margin Support': 0.09,
+};
 
 const $ = (id) => document.getElementById(id);
 const uid = (p) => `${p}_${Math.random().toString(36).slice(2, 9)}`;
@@ -31,11 +54,7 @@ const state = {
   editRecipeId: null,
   editDishId: null,
   mode: 'home',
-  ingredientUi: {
-    search: '',
-    supplierFilter: 'all',
-    collapsedSuppliers: new Set(),
-  },
+  ingredientUi: { search: '', supplierFilter: 'all', collapsedSuppliers: new Set() },
 };
 
 function safeParse(k, fallback) {
@@ -125,6 +144,13 @@ function normalizeDish(raw = {}) {
     unitsSold: Math.max(0, Math.round(n(raw.unitsSold, 0))),
     reportingPeriod: t(raw.reportingPeriod) || 'Last 30 Days',
     notes: t(raw.notes || raw.itemNotes),
+    pricingStrategy: PRICING_STRATEGIES.includes(raw.pricingStrategy) ? raw.pricingStrategy : 'Standard',
+    labourIntensity: LABOUR_OPTIONS.includes(raw.labourIntensity) ? raw.labourIntensity : 'Medium',
+    perceivedValue: VALUE_OPTIONS.includes(raw.perceivedValue) ? raw.perceivedValue : 'Medium',
+    menuRole: MENU_ROLES.includes(raw.menuRole) ? raw.menuRole : 'Core Main',
+    marketLowPrice: n(raw.marketLowPrice, NaN) > 0 ? n(raw.marketLowPrice) : null,
+    marketHighPrice: n(raw.marketHighPrice, NaN) > 0 ? n(raw.marketHighPrice) : null,
+    minimumAcceptablePrice: n(raw.minimumAcceptablePrice, NaN) > 0 ? n(raw.minimumAcceptablePrice) : null,
     createdAt: t(raw.createdAt) || now(),
     updatedAt: now(),
   };
@@ -161,20 +187,120 @@ function dishComponentCost(component) {
   return rm.costPerYieldUnit * cv.value;
 }
 
+function roundToRule(price, rule) {
+  const useRule = Math.max(n(rule, 0.25), 0.01);
+  return Math.round(price / useRule) * useRule;
+}
+
+function pricingIntelligence(dish, portionCost, formulaPrice) {
+  const strategy = STRATEGY_CONFIG[dish.pricingStrategy] || STRATEGY_CONFIG.Standard;
+  const marketLow = n(dish.marketLowPrice, 0) > 0 ? n(dish.marketLowPrice) : null;
+  const marketHigh = n(dish.marketHighPrice, 0) > 0 ? n(dish.marketHighPrice) : null;
+  const marketMid = marketLow && marketHigh ? (marketLow + marketHigh) / 2 : (marketLow || marketHigh || formulaPrice);
+
+  const labourAdj = LABOUR_UPLIFT[dish.labourIntensity] ?? 0;
+  const valueAdj = VALUE_UPLIFT[dish.perceivedValue] ?? 0;
+  const roleAdj = ROLE_UPLIFT[dish.menuRole] ?? 0;
+
+  const strategicBase = formulaPrice * (1 + labourAdj + valueAdj + roleAdj);
+  let strategicRecommendedPrice = (formulaPrice * strategy.formula) + (marketMid * strategy.market) + (strategicBase * strategy.strategic);
+
+  if (dish.pricingStrategy === 'Margin Driver' && strategicRecommendedPrice < formulaPrice * 1.15) strategicRecommendedPrice = formulaPrice * 1.15;
+  if (dish.pricingStrategy === 'Premium Signature' && strategicRecommendedPrice < formulaPrice * 1.1) strategicRecommendedPrice = formulaPrice * 1.1;
+  if (dish.pricingStrategy === 'Traffic Builder') strategicRecommendedPrice *= 0.98;
+
+  const floors = [];
+  if (strategy.protectFormula) floors.push(formulaPrice);
+  if (strategy.useMarketFloor && marketLow) floors.push(marketLow);
+  if (n(dish.minimumAcceptablePrice, 0) > 0) floors.push(n(dish.minimumAcceptablePrice));
+  floors.push(formulaPrice * strategy.internalFloorFactor);
+
+  const strategicFloor = Math.max(...floors.filter((x) => x > 0), 0);
+  const preRoundedFinal = Math.max(strategicRecommendedPrice, strategicFloor);
+  const finalRecommendedPrice = roundToRule(preRoundedFinal, dish.roundingRule);
+  const actualFoodCostAtFinal = finalRecommendedPrice > 0 ? (portionCost / finalRecommendedPrice) * 100 : 0;
+
+  const rationale = [];
+  const flags = [];
+  if (dish.pricingStrategy === 'Margin Driver') rationale.push('Recommendation is lifted above formula pricing because this item is marked as a margin driver.');
+  if (dish.pricingStrategy === 'Traffic Builder') rationale.push('Traffic Builder strategy keeps pricing tighter, but margin should be monitored.');
+  if (dish.pricingStrategy === 'Premium Signature') rationale.push('Premium Signature positioning supports a stronger selling price than formula alone.');
+  if (labourAdj > 0 || valueAdj > 0) rationale.push(`${dish.labourIntensity} labour and ${dish.perceivedValue.toLowerCase()} perceived value influence strategic pricing.`);
+  if (marketLow && formulaPrice < marketLow * 0.9) {
+    rationale.push('Market pricing suggests the formula price is too low for this category.');
+    flags.push('Formula price likely too low');
+    flags.push('Price below market range');
+  }
+  if (marketHigh && formulaPrice > marketHigh * 1.1) {
+    rationale.push('Formula price sits above the observed market range and may need positioning review.');
+    flags.push('Price above market range');
+  }
+  if (actualFoodCostAtFinal > Math.max(dish.targetFoodCostPercent + 3, 40)) flags.push('Margin too weak');
+  if (actualFoodCostAtFinal < 22) {
+    flags.push('Strong margin opportunity');
+    if (dish.pricingStrategy === 'Margin Driver' || dish.pricingStrategy === 'Premium Signature') rationale.push('Lower food cost % is acceptable here because the dish is positioned as a margin-focused item.');
+  }
+  if (dish.labourIntensity === 'High') flags.push('Review labour burden');
+  if (dish.menuRole === 'Side / Add-On' || dish.menuRole === 'High Margin Support') flags.push('Suitable for upsell / add-on pricing');
+  if (dish.perceivedValue === 'High' && dish.labourIntensity === 'High') flags.push('Premium positioning supported');
+
+  const minContributionThreshold = dish.pricingStrategy === 'Traffic Builder' ? 2 : 3;
+  if ((finalRecommendedPrice - portionCost) < minContributionThreshold) flags.push('Contribution margin below threshold');
+
+  const confidence = Math.min(95, 52
+    + (marketLow && marketHigh ? 20 : 0)
+    + (dish.perceivedValue === 'High' ? 8 : 0)
+    + (dish.labourIntensity !== 'Low' ? 6 : 0)
+    + (n(dish.minimumAcceptablePrice, 0) > 0 ? 5 : 0));
+
+  return {
+    marketLow,
+    marketHigh,
+    marketMid,
+    marketGuidedPrice: marketMid,
+    strategicRecommendedPrice,
+    finalRecommendedPrice,
+    actualFoodCostAtFinal,
+    rationale: rationale.length ? rationale : ['Recommendation balances formula cost, dish strategy, and operating realities.'],
+    flags: [...new Set(flags)],
+    confidence,
+    strategicFloor,
+  };
+}
+
 function dishMetrics(dish) {
   const components = (dish.components || []).map((c) => ({ ...c, calculatedCost: dishComponentCost(c) }));
   const componentCost = components.reduce((s, c) => s + c.calculatedCost, 0);
-  const totalPortionCost = componentCost + n(dish.packagingCostPerPortion, 0);
-  const suggestedPrice = totalPortionCost / (Math.max(n(dish.targetFoodCostPercent, 30), 0.01) / 100);
-  const rule = Math.max(n(dish.roundingRule, 0.25), 0.01);
-  const roundedPrice = Math.round(suggestedPrice / rule) * rule;
-  const effectivePrice = n(dish.manualPriceOverride, 0) > 0 ? n(dish.manualPriceOverride) : (n(dish.currentSellingPrice, 0) > 0 ? n(dish.currentSellingPrice) : roundedPrice);
-  const foodCostPercent = effectivePrice > 0 ? (totalPortionCost / effectivePrice) * 100 : 0;
+  const portionCost = componentCost + n(dish.packagingCostPerPortion, 0);
+  const formulaPrice = portionCost / (Math.max(n(dish.targetFoodCostPercent, 30), 0.01) / 100);
+  const intelligence = pricingIntelligence(dish, portionCost, formulaPrice);
+  const effectivePrice = n(dish.manualPriceOverride, 0) > 0
+    ? n(dish.manualPriceOverride)
+    : (n(dish.currentSellingPrice, 0) > 0 ? n(dish.currentSellingPrice) : intelligence.finalRecommendedPrice);
+  const foodCostPercent = effectivePrice > 0 ? (portionCost / effectivePrice) * 100 : 0;
   const unitsSold = Math.max(0, Math.round(n(dish.unitsSold, 0)));
   const revenue = effectivePrice * unitsSold;
-  const totalGrossProfit = (effectivePrice - totalPortionCost) * unitsSold;
-  const grossProfitPerPortion = effectivePrice - totalPortionCost;
-  return { components, totalPortionCost, suggestedPrice, roundedPrice, effectivePrice, foodCostPercent, revenue, totalGrossProfit, grossProfitPerPortion, unitsSold };
+  const totalGrossProfit = (effectivePrice - portionCost) * unitsSold;
+  const grossProfitPerPortion = effectivePrice - portionCost;
+  const recommendedRevenue = intelligence.finalRecommendedPrice * unitsSold;
+  const recommendedTotalGp = (intelligence.finalRecommendedPrice - portionCost) * unitsSold;
+  return {
+    components,
+    totalPortionCost: portionCost,
+    formulaPrice,
+    roundedFormulaPrice: roundToRule(formulaPrice, dish.roundingRule),
+    effectivePrice,
+    foodCostPercent,
+    revenue,
+    totalGrossProfit,
+    grossProfitPerPortion,
+    unitsSold,
+    ...intelligence,
+    recommendedRevenue,
+    recommendedTotalGp,
+    formulaToFinalGap: intelligence.finalRecommendedPrice - formulaPrice,
+    currentToFinalGap: intelligence.finalRecommendedPrice - n(dish.currentSellingPrice, 0),
+  };
 }
 
 function classifyDishes(items) {
@@ -202,90 +328,115 @@ function splitMixedV5Recipes(recipes) {
   (recipes || []).forEach((r) => {
     if (isLegacyDishLikeRecipe(r)) {
       const migratedComponents = (Array.isArray(r.ingredientInputs) ? r.ingredientInputs : []).map((ri) => ({
-        id: uid('cmp'),
-        sourceType: 'ingredient',
-        sourceId: t(ri.sourceId || ri.ingredientId),
-        sourceNameSnapshot: t(ri.sourceNameSnapshot || ri.ingredientNameSnapshot || ri.name),
-        quantityUsed: Math.max(0, n(ri.quantityUsed, ri.amountUsed)),
-        useUnit: UNITS.includes(ri.useUnit) ? ri.useUnit : 'g',
-        calculatedCost: 0,
+        id: uid('cmp'), sourceType: 'ingredient', sourceId: t(ri.sourceId || ri.ingredientId), sourceNameSnapshot: t(ri.sourceNameSnapshot || ri.ingredientNameSnapshot || ri.name),
+        quantityUsed: Math.max(0, n(ri.quantityUsed, ri.amountUsed)), useUnit: UNITS.includes(ri.useUnit) ? ri.useUnit : 'g', calculatedCost: 0,
       })).filter((c) => c.sourceId && c.quantityUsed > 0);
       outputDishes.push(normalizeDish({ ...r, id: uid('dish'), components: migratedComponents, reportingPeriod: t(r.reportingPeriod) || 'Migrated from mixed v5 recipe' }));
-    } else {
-      outputRecipes.push(normalizeRecipe(r));
-    }
+    } else outputRecipes.push(normalizeRecipe(r));
   });
   return { outputRecipes, outputDishes };
+}
+
+function seedSampleDataIfEmpty() {
+  if (state.ingredients.length || state.recipes.length || state.dishes.length) return;
+  const wings = normalizeIngredient({ id: uid('ing'), name: 'Chicken Wings', purchasePrice: 18, packSize: 5000, packUnit: 'g', supplier: 'Kiju Poultry' });
+  const flour = normalizeIngredient({ id: uid('ing'), name: 'Flour', purchasePrice: 1.4, packSize: 1000, packUnit: 'g', supplier: 'Dry Goods Co' });
+  const spice = normalizeIngredient({ id: uid('ing'), name: 'Seasoning Blend', purchasePrice: 6, packSize: 1000, packUnit: 'g', supplier: 'Dry Goods Co' });
+  const oil = normalizeIngredient({ id: uid('ing'), name: 'Fryer Oil Allocation', purchasePrice: 2.4, packSize: 1, packUnit: 'unit', supplier: 'Kitchen Ops' });
+  const chickenBreast = normalizeIngredient({ id: uid('ing'), name: 'Chicken Breast', purchasePrice: 24, packSize: 5000, packUnit: 'g', supplier: 'Kiju Poultry' });
+  const vegMix = normalizeIngredient({ id: uid('ing'), name: 'Veg Garnish Mix', purchasePrice: 7, packSize: 2000, packUnit: 'g', supplier: 'Fresh Produce' });
+  state.ingredients = [wings, flour, spice, oil, chickenBreast, vegMix];
+
+  state.dishes = [
+    normalizeDish({
+      name: 'Beer Battered Wings',
+      category: 'Starters',
+      components: [
+        { sourceType: 'ingredient', sourceId: wings.id, quantityUsed: 280, useUnit: 'g' },
+        { sourceType: 'ingredient', sourceId: flour.id, quantityUsed: 40, useUnit: 'g' },
+        { sourceType: 'ingredient', sourceId: spice.id, quantityUsed: 7, useUnit: 'g' },
+        { sourceType: 'ingredient', sourceId: oil.id, quantityUsed: 1, useUnit: 'unit' },
+      ],
+      packagingCostPerPortion: 0.2,
+      targetFoodCostPercent: 30,
+      roundingRule: 0.25,
+      pricingStrategy: 'Margin Driver',
+      labourIntensity: 'High',
+      perceivedValue: 'High',
+      menuRole: 'High Margin Support',
+      marketLowPrice: 10.95,
+      marketHighPrice: 14.95,
+      minimumAcceptablePrice: 10.95,
+      currentSellingPrice: 9.95,
+      unitsSold: 180,
+    }),
+    normalizeDish({
+      name: 'Grilled Chicken Bowl',
+      category: 'Mains',
+      components: [
+        { sourceType: 'ingredient', sourceId: chickenBreast.id, quantityUsed: 220, useUnit: 'g' },
+        { sourceType: 'ingredient', sourceId: vegMix.id, quantityUsed: 140, useUnit: 'g' },
+      ],
+      packagingCostPerPortion: 0.25,
+      targetFoodCostPercent: 32,
+      roundingRule: 0.25,
+      pricingStrategy: 'Standard',
+      labourIntensity: 'Medium',
+      perceivedValue: 'Medium',
+      menuRole: 'Core Main',
+      marketLowPrice: 11.95,
+      marketHighPrice: 13.95,
+      currentSellingPrice: 12.5,
+      unitsSold: 140,
+    }),
+  ];
 }
 
 function migrateLegacyData() {
   const v5Ingredients = safeParse(STORAGE_KEYS.ingredients, null);
   if (Array.isArray(v5Ingredients)) {
     state.ingredients = v5Ingredients.map(normalizeIngredient);
-    const v5RecipesRaw = safeParse(STORAGE_KEYS.recipes, []);
-    const split = splitMixedV5Recipes(v5RecipesRaw);
+    const split = splitMixedV5Recipes(safeParse(STORAGE_KEYS.recipes, []));
     state.recipes = split.outputRecipes;
     state.dishes = [...safeParse(STORAGE_KEYS.dishes, []).map(normalizeDish), ...split.outputDishes];
     state.snapshots = safeParse(STORAGE_KEYS.snapshots, []);
     state.weeklyReviews = safeParse(STORAGE_KEYS.weeklyReviews, []);
+    seedSampleDataIfEmpty();
     persist();
     return;
   }
 
-  const legacyIngredients = safeParse(STORAGE_KEYS.legacyIngredients, []);
-  const legacyRecipes = safeParse(STORAGE_KEYS.legacyRecipes, []);
-  state.ingredients = (legacyIngredients || []).map(normalizeIngredient);
-
+  state.ingredients = safeParse(STORAGE_KEYS.legacyIngredients, []).map(normalizeIngredient);
   state.recipes = [];
   state.dishes = [];
 
-  (legacyRecipes || []).forEach((r) => {
-    const id = t(r.id) || uid('legacy');
+  safeParse(STORAGE_KEYS.legacyRecipes, []).forEach((r) => {
     const rows = Array.isArray(r.ingredientRows) ? r.ingredientRows : [];
     const ingredientInputs = rows.map((row) => ({
-      id: uid('rin'),
-      sourceId: t(row.ingredientId),
-      sourceNameSnapshot: t(row.ingredientNameSnapshot || row.name),
-      quantityUsed: Math.max(0, n(row.amountUsed)),
-      useUnit: UNITS.includes(row.useUnit) ? row.useUnit : 'g',
-      calculatedCost: 0,
+      id: uid('rin'), sourceId: t(row.ingredientId), sourceNameSnapshot: t(row.ingredientNameSnapshot || row.name),
+      quantityUsed: Math.max(0, n(row.amountUsed)), useUnit: UNITS.includes(row.useUnit) ? row.useUnit : 'g', calculatedCost: 0,
     }));
-
     if (isLegacyDishLikeRecipe(r)) {
       state.dishes.push(normalizeDish({
-        id: uid('dish'),
-        name: t(r.name) || `Migrated Dish ${id}`,
-        category: t(r.category),
-        active: typeof r.isActive === 'boolean' ? r.isActive : true,
+        name: t(r.name), category: t(r.category), active: typeof r.isActive === 'boolean' ? r.isActive : true,
         components: ingredientInputs.map((ri) => ({ ...ri, sourceType: 'ingredient' })),
         packagingCostPerPortion: n(r.packagingCostPerPortion, r.packagingCost),
         targetFoodCostPercent: n(r.targetFoodCostPercent, r.targetFoodCost, 30),
-        vatRatePercent: n(r.vatRatePercent, 20),
-        deliveryCommissionPercent: n(r.deliveryCommissionPercent, 30),
-        roundingRule: n(r.roundingRule, 0.25),
-        currentSellingPrice: n(r.currentSellingPrice, r.sellingPrice),
-        manualPriceOverride: n(r.manualMenuPrice, 0) || '',
-        unitsSold: Math.round(n(r.unitsSold, 0)),
-        reportingPeriod: t(r.reportingPeriod) || 'Migrated',
-        notes: t(r.itemNotes),
-        createdAt: t(r.createdAt) || now(),
+        vatRatePercent: n(r.vatRatePercent, 20), deliveryCommissionPercent: n(r.deliveryCommissionPercent, 30), roundingRule: n(r.roundingRule, 0.25),
+        currentSellingPrice: n(r.currentSellingPrice, r.sellingPrice), manualPriceOverride: n(r.manualMenuPrice, 0) || '', unitsSold: Math.round(n(r.unitsSold, 0)),
+        reportingPeriod: t(r.reportingPeriod) || 'Migrated', notes: t(r.itemNotes), createdAt: t(r.createdAt) || now(),
       }));
     } else {
       state.recipes.push(normalizeRecipe({
-        id: uid('rec'),
-        name: t(r.name) || `Migrated Recipe ${id}`,
-        category: t(r.category),
-        yieldQuantity: n(r.yieldQuantity, r.portionsYielded, 1),
-        yieldUnit: UNITS.includes(r.yieldUnit) ? r.yieldUnit : 'unit',
-        ingredientInputs,
-        notes: t(r.notes || r.itemNotes),
-        createdAt: t(r.createdAt) || now(),
+        name: t(r.name), category: t(r.category), yieldQuantity: n(r.yieldQuantity, r.portionsYielded, 1),
+        yieldUnit: UNITS.includes(r.yieldUnit) ? r.yieldUnit : 'unit', ingredientInputs, notes: t(r.notes || r.itemNotes), createdAt: t(r.createdAt) || now(),
       }));
     }
   });
 
   state.snapshots = safeParse(STORAGE_KEYS.legacySnapshots, []);
   state.weeklyReviews = safeParse(STORAGE_KEYS.legacyWeekly, []);
+  seedSampleDataIfEmpty();
   persist();
 }
 
@@ -301,20 +452,12 @@ function modeSwitch(mode) {
   $('mode-indicator').textContent = `Mode: ${activeLabel}`;
 }
 
-function supplierKey(supplierName) {
-  return t(supplierName).toLocaleLowerCase() || '__unassigned__';
-}
-
-function supplierLabel(supplierName) {
-  return t(supplierName) || 'Unassigned supplier';
-}
-
+function supplierKey(supplierName) { return t(supplierName).toLocaleLowerCase() || '__unassigned__'; }
+function supplierLabel(supplierName) { return t(supplierName) || 'Unassigned supplier'; }
 function ingredientMatchesSearch(ingredient, searchTerm) {
   if (!searchTerm) return true;
-  const haystack = [ingredient.name, ingredient.supplier, ingredient.notes, ingredient.packUnit].map((v) => t(v).toLocaleLowerCase()).join(' ');
-  return haystack.includes(searchTerm);
+  return [ingredient.name, ingredient.supplier, ingredient.notes, ingredient.packUnit].map((v) => t(v).toLocaleLowerCase()).join(' ').includes(searchTerm);
 }
-
 function filteredIngredients() {
   const searchTerm = t(state.ingredientUi.search).toLocaleLowerCase();
   return state.ingredients.filter((ingredient) => {
@@ -323,7 +466,6 @@ function filteredIngredients() {
     return supplierMatches && ingredientMatchesSearch(ingredient, searchTerm);
   });
 }
-
 function groupedIngredients(items) {
   const map = new Map();
   items.forEach((ingredient) => {
@@ -331,16 +473,7 @@ function groupedIngredients(items) {
     if (!map.has(key)) map.set(key, { key, label: supplierLabel(ingredient.supplier), items: [] });
     map.get(key).items.push(ingredient);
   });
-  const groups = [...map.values()].map((group) => ({
-    ...group,
-    items: group.items.sort((a, b) => a.name.localeCompare(b.name)),
-  }));
-  groups.sort((a, b) => {
-    if (a.key === '__unassigned__') return -1;
-    if (b.key === '__unassigned__') return 1;
-    return a.label.localeCompare(b.label);
-  });
-  return groups;
+  return [...map.values()].map((group) => ({ ...group, items: group.items.sort((a, b) => a.name.localeCompare(b.name)) })).sort((a, b) => (a.key === '__unassigned__' ? -1 : b.key === '__unassigned__' ? 1 : a.label.localeCompare(b.label)));
 }
 
 function renderIngredientSupplierFilter() {
@@ -358,50 +491,22 @@ function renderIngredients() {
   $('ing-count').textContent = String(items.length);
   $('ing-supplier-count').textContent = String(groups.length);
   renderIngredientSupplierFilter();
-
   if (!groups.length) {
-    const supplierText = state.ingredientUi.supplierFilter === 'all'
-      ? 'all suppliers'
-      : (groupedIngredients(state.ingredients).find((g) => g.key === state.ingredientUi.supplierFilter)?.label || 'selected supplier');
-    const hasSearch = t(state.ingredientUi.search).length > 0;
-    $('ing-groups').innerHTML = `<p class="muted ingredient-empty">No ingredients found for ${supplierText}${hasSearch ? ` with search “${t(state.ingredientUi.search)}”` : ''}.</p>`;
+    $('ing-groups').innerHTML = '<p class="muted ingredient-empty">No ingredients found.</p>';
     return;
   }
-
   $('ing-groups').innerHTML = groups.map((group) => {
     const collapsed = state.ingredientUi.collapsedSuppliers.has(group.key);
     const bodyId = `supplier-panel-${group.key}`;
     const isUnassigned = group.key === '__unassigned__';
     return `<section class="supplier-group${isUnassigned ? ' supplier-group--unassigned' : ''}">
       <button class="supplier-group__header" type="button" data-supplier-toggle="${group.key}" aria-controls="${bodyId}" aria-expanded="${(!collapsed).toString()}">
-        <span class="supplier-group__left">
-          <span class="supplier-group__title">${group.label}</span>
-          <span class="supplier-group__hint">${isUnassigned ? 'Needs supplier assignment for cleaner purchasing workflows.' : 'Supplier section'}</span>
-        </span>
-        <span class="supplier-group__right">
-          <span class="supplier-group__meta">${group.items.length} ingredient${group.items.length === 1 ? '' : 's'}</span>
-          <span class="supplier-group__chevron">⌄</span>
-        </span>
+        <span class="supplier-group__left"><span class="supplier-group__title">${group.label}</span><span class="supplier-group__hint">${group.items.length} items</span></span>
+        <span class="supplier-group__right"><span class="supplier-group__chevron">⌄</span></span>
       </button>
-      <div id="${bodyId}" class="supplier-group__body ${collapsed ? 'is-collapsed' : ''}">
-      <div class="supplier-group__content">
-        ${group.items.map((i) => `<article class="ingredient-card">
-          <div class="ingredient-card__main">
-            <strong>${i.name}</strong>
-            <div class="ingredient-card__meta">
-              <span class="chip">${i.packSize} ${i.packUnit}</span>
-              <span class="chip">${money(i.purchasePrice)}</span>
-              ${isUnassigned ? '<span class="chip">Unassigned</span>' : ''}
-            </div>
-            ${i.notes ? `<span class="muted">${i.notes}</span>` : ''}
-          </div>
-          <div class="ingredient-card__actions">
-            <button class="btn" type="button" data-ing-edit="${i.id}">Edit</button>
-            <button class="btn danger" type="button" data-ing-del="${i.id}">Delete</button>
-          </div>
-        </article>`).join('')}
-      </div>
-      </div>
+      <div id="${bodyId}" class="supplier-group__body ${collapsed ? 'is-collapsed' : ''}"><div class="supplier-group__content">
+      ${group.items.map((i) => `<article class="ingredient-card"><div class="ingredient-card__main"><strong>${i.name}</strong><div class="ingredient-card__meta"><span class="chip">${i.packSize} ${i.packUnit}</span><span class="chip">${money(i.purchasePrice)}</span></div>${i.notes ? `<span class="muted">${i.notes}</span>` : ''}</div><div class="ingredient-card__actions"><button class="btn" type="button" data-ing-edit="${i.id}">Edit</button><button class="btn danger" type="button" data-ing-del="${i.id}">Delete</button></div></article>`).join('')}
+      </div></div>
     </section>`;
   }).join('');
 }
@@ -425,22 +530,16 @@ function addRecipeRow(data = null) {
 
 function readRecipeForm() {
   const ingredientInputs = [...$('rec-rows').querySelectorAll('tr')].map((tr) => ({
-    id: uid('rin'),
-    sourceId: tr.querySelector('.src-id').value,
+    id: uid('rin'), sourceId: tr.querySelector('.src-id').value,
     sourceNameSnapshot: state.ingredients.find((i) => i.id === tr.querySelector('.src-id').value)?.name || '',
-    quantityUsed: Math.max(0, n(tr.querySelector('.qty').value, 0)),
-    useUnit: tr.querySelector('.unit').value,
+    quantityUsed: Math.max(0, n(tr.querySelector('.qty').value, 0)), useUnit: tr.querySelector('.unit').value,
     calculatedCost: n(tr.querySelector('.cost').dataset.value, 0),
   })).filter((r) => r.sourceId && r.quantityUsed > 0);
 
   return normalizeRecipe({
-    id: state.editRecipeId || uid('rec'),
-    name: t($('rec-name').value),
-    category: t($('rec-category').value),
-    yieldQuantity: Math.max(0.01, n($('rec-yield-qty').value, 1)),
-    yieldUnit: $('rec-yield-unit').value,
-    ingredientInputs,
-    notes: t($('rec-notes').value),
+    id: state.editRecipeId || uid('rec'), name: t($('rec-name').value), category: t($('rec-category').value),
+    yieldQuantity: Math.max(0.01, n($('rec-yield-qty').value, 1)), yieldUnit: $('rec-yield-unit').value,
+    ingredientInputs, notes: t($('rec-notes').value),
     createdAt: state.editRecipeId ? state.recipes.find((r) => r.id === state.editRecipeId)?.createdAt || now() : now(),
   });
 }
@@ -488,16 +587,11 @@ function fillDishSourceOptions(row) {
 function syncDishRowUnitToSource(row) {
   const type = row.querySelector('.src-type').value;
   const sourceId = row.querySelector('.src-id').value;
-  const unitSel = row.querySelector('.unit');
   if (!sourceId) return;
-
-  const source = type === 'ingredient'
-    ? state.ingredients.find((i) => i.id === sourceId)
-    : state.recipes.find((r) => r.id === sourceId);
-
+  const source = type === 'ingredient' ? state.ingredients.find((i) => i.id === sourceId) : state.recipes.find((r) => r.id === sourceId);
   if (!source) return;
   const preferred = type === 'ingredient' ? source.packUnit : source.yieldUnit;
-  if (UNITS.includes(preferred)) unitSel.value = preferred;
+  row.querySelector('.unit').value = preferred;
 }
 
 function addDishRow(data = null) {
@@ -509,16 +603,8 @@ function addDishRow(data = null) {
     row.querySelector('.qty').value = data.quantityUsed;
     row.querySelector('.unit').value = data.useUnit;
   }
-
-  row.querySelector('.src-type').addEventListener('change', () => {
-    fillDishSourceOptions(row);
-    row.querySelector('.src-id').value = '';
-    renderDishMetrics();
-  });
-  row.querySelector('.src-id').addEventListener('change', () => {
-    syncDishRowUnitToSource(row);
-    renderDishMetrics();
-  });
+  row.querySelector('.src-type').addEventListener('change', () => { fillDishSourceOptions(row); row.querySelector('.src-id').value = ''; renderDishMetrics(); });
+  row.querySelector('.src-id').addEventListener('change', () => { syncDishRowUnitToSource(row); renderDishMetrics(); });
   row.querySelector('.remove').addEventListener('click', () => { row.remove(); renderDishMetrics(); });
   row.querySelectorAll('select,input').forEach((el) => el.addEventListener('input', renderDishMetrics));
   $('dish-rows').appendChild(row);
@@ -530,32 +616,28 @@ function readDishForm() {
     const sourceId = tr.querySelector('.src-id').value;
     const source = sourceType === 'ingredient' ? state.ingredients.find((i) => i.id === sourceId) : state.recipes.find((r) => r.id === sourceId);
     return {
-      id: uid('cmp'),
-      sourceType,
-      sourceId,
-      sourceNameSnapshot: source?.name || '',
-      quantityUsed: Math.max(0, n(tr.querySelector('.qty').value, 0)),
-      useUnit: tr.querySelector('.unit').value,
+      id: uid('cmp'), sourceType, sourceId, sourceNameSnapshot: source?.name || '',
+      quantityUsed: Math.max(0, n(tr.querySelector('.qty').value, 0)), useUnit: tr.querySelector('.unit').value,
       calculatedCost: n(tr.querySelector('.cost').dataset.value, 0),
     };
   }).filter((c) => c.sourceId && c.quantityUsed > 0);
 
   return normalizeDish({
     id: state.editDishId || uid('dish'),
-    name: t($('dish-name').value),
-    category: t($('dish-category').value),
-    active: $('dish-active').value === 'true',
-    components,
+    name: t($('dish-name').value), category: t($('dish-category').value), active: $('dish-active').value === 'true', components,
     packagingCostPerPortion: Math.max(0, n($('dish-packaging').value, 0)),
     targetFoodCostPercent: Math.max(0.01, n($('dish-target').value, 30)),
-    vatRatePercent: Math.max(0, n($('dish-vat').value, 20)),
-    deliveryCommissionPercent: Math.max(0, n($('dish-delivery').value, 30)),
+    vatRatePercent: Math.max(0, n($('dish-vat').value, 20)), deliveryCommissionPercent: Math.max(0, n($('dish-delivery').value, 30)),
     roundingRule: Math.max(0.01, n($('dish-rounding').value, 0.25)),
-    currentSellingPrice: Math.max(0, n($('dish-price').value, 0)),
-    manualPriceOverride: Math.max(0, n($('dish-manual').value, 0)) || '',
-    unitsSold: Math.max(0, Math.round(n($('dish-units').value, 0))),
-    reportingPeriod: t($('dish-period').value) || 'Last 30 Days',
-    notes: t($('dish-notes').value),
+    currentSellingPrice: Math.max(0, n($('dish-price').value, 0)), manualPriceOverride: Math.max(0, n($('dish-manual').value, 0)) || '',
+    unitsSold: Math.max(0, Math.round(n($('dish-units').value, 0))), reportingPeriod: t($('dish-period').value) || 'Last 30 Days', notes: t($('dish-notes').value),
+    pricingStrategy: $('dish-pricing-strategy').value,
+    labourIntensity: $('dish-labour-intensity').value,
+    perceivedValue: $('dish-perceived-value').value,
+    menuRole: $('dish-menu-role').value,
+    marketLowPrice: n($('dish-market-low').value, 0) > 0 ? n($('dish-market-low').value) : null,
+    marketHighPrice: n($('dish-market-high').value, 0) > 0 ? n($('dish-market-high').value) : null,
+    minimumAcceptablePrice: n($('dish-min-price').value, 0) > 0 ? n($('dish-min-price').value) : null,
     createdAt: state.editDishId ? state.dishes.find((d) => d.id === state.editDishId)?.createdAt || now() : now(),
   });
 }
@@ -569,7 +651,30 @@ function renderDishMetrics() {
     el.textContent = money(val);
     el.dataset.value = String(val);
   });
-  $('dish-metrics').innerHTML = `Total Portion Cost: <strong>${money(metrics.totalPortionCost)}</strong> · Suggested: <strong>${money(metrics.suggestedPrice)}</strong> · Rounded: <strong>${money(metrics.roundedPrice)}</strong> · Actual Food Cost: <strong>${metrics.foodCostPercent.toFixed(2)}%</strong> · Revenue: <strong>${money(metrics.revenue)}</strong>`;
+
+  const marketRange = metrics.marketLow && metrics.marketHigh
+    ? `${money(metrics.marketLow)} – ${money(metrics.marketHigh)}`
+    : 'Not provided';
+
+  $('dish-metrics').innerHTML = `
+    <div class="metrics-grid">
+      <div><span>Portion Cost</span><strong>${money(metrics.totalPortionCost)}</strong></div>
+      <div><span>Formula Price</span><strong>${money(metrics.formulaPrice)}</strong></div>
+      <div><span>Market-Guided Range</span><strong>${marketRange}</strong></div>
+      <div><span>Strategic Recommended</span><strong>${money(metrics.strategicRecommendedPrice)}</strong></div>
+      <div><span>Final Recommended</span><strong class="highlight">${money(metrics.finalRecommendedPrice)}</strong></div>
+      <div><span>Food Cost % @ Final</span><strong>${metrics.actualFoodCostAtFinal.toFixed(2)}%</strong></div>
+      <div><span>Confidence</span><strong>${metrics.confidence}%</strong></div>
+      <div><span>Current vs Final Gap</span><strong>${money(metrics.currentToFinalGap)}</strong></div>
+      <div><span>Formula vs Final Gap</span><strong>${money(metrics.formulaToFinalGap)}</strong></div>
+    </div>
+    <div class="rationale-block">
+      <h4>Pricing Rationale</h4>
+      <ul>${metrics.rationale.map((line) => `<li>${line}</li>`).join('')}</ul>
+      <h4>Pricing Flags</h4>
+      <p>${metrics.flags.length ? metrics.flags.join(' · ') : 'No pricing flags.'}</p>
+    </div>
+  `;
 }
 
 function setDishForm(dish = null) {
@@ -587,6 +692,14 @@ function setDishForm(dish = null) {
   $('dish-units').value = dish?.unitsSold ?? 0;
   $('dish-period').value = dish?.reportingPeriod || 'Last 30 Days';
   $('dish-notes').value = dish?.notes || '';
+  $('dish-pricing-strategy').value = dish?.pricingStrategy || 'Standard';
+  $('dish-labour-intensity').value = dish?.labourIntensity || 'Medium';
+  $('dish-perceived-value').value = dish?.perceivedValue || 'Medium';
+  $('dish-menu-role').value = dish?.menuRole || 'Core Main';
+  $('dish-market-low').value = dish?.marketLowPrice ?? '';
+  $('dish-market-high').value = dish?.marketHighPrice ?? '';
+  $('dish-min-price').value = dish?.minimumAcceptablePrice ?? '';
+
   $('dish-rows').innerHTML = '';
   (dish?.components?.length ? dish.components : [{}]).forEach((c) => addDishRow(c.sourceId ? c : null));
   renderDishMetrics();
@@ -594,7 +707,7 @@ function setDishForm(dish = null) {
 
 function renderDishes() {
   const evaluated = classifyDishes(state.dishes.map((d) => ({ ...d, ...dishMetrics(d) })));
-  $('dish-list').innerHTML = evaluated.map((d) => `<li><strong>${d.name}</strong> · ${d.classification} · Price ${money(d.effectivePrice)} · FC ${d.foodCostPercent.toFixed(2)}%
+  $('dish-list').innerHTML = evaluated.map((d) => `<li><strong>${d.name}</strong> · ${d.classification} · Formula ${money(d.formulaPrice)} · Final Reco ${money(d.finalRecommendedPrice)} · FC@Reco ${d.actualFoodCostAtFinal.toFixed(2)}%
     <button class="btn" data-dish-edit="${d.id}">Edit</button>
     <button class="btn danger" data-dish-del="${d.id}">Delete</button></li>`).join('') || '<li>No dishes yet.</li>';
 }
@@ -604,25 +717,28 @@ function renderHome() {
   const active = dishes.filter((d) => d.active);
   const totals = {
     dishes: active.length,
-    revenue: active.reduce((s, d) => s + d.revenue, 0),
-    gp: active.reduce((s, d) => s + d.totalGrossProfit, 0),
-    avgFc: active.length ? active.reduce((s, d) => s + d.foodCostPercent, 0) / active.length : 0,
+    currentRevenue: active.reduce((s, d) => s + d.revenue, 0),
+    recommendedRevenue: active.reduce((s, d) => s + d.recommendedRevenue, 0),
+    currentGp: active.reduce((s, d) => s + d.totalGrossProfit, 0),
+    recommendedGp: active.reduce((s, d) => s + d.recommendedTotalGp, 0),
   };
   $('home-kpis').innerHTML = [
     ['Active Dishes', totals.dishes],
-    ['Revenue', money(totals.revenue)],
-    ['Total Gross Profit', money(totals.gp)],
-    ['Avg Food Cost %', `${totals.avgFc.toFixed(2)}%`],
+    ['Current Revenue', money(totals.currentRevenue)],
+    ['Revenue @ Final Reco', money(totals.recommendedRevenue)],
+    ['Current GP', money(totals.currentGp)],
+    ['GP @ Final Reco', money(totals.recommendedGp)],
   ].map(([k, v]) => `<div class="kpi"><span>${k}</span><strong>${v}</strong></div>`).join('');
 
-  const risky = dishes.filter((d) => d.foodCostPercent > d.targetFoodCostPercent || d.classification === 'Dog').slice(0, 5);
+  const risky = dishes.filter((d) => d.flags.includes('Margin too weak') || d.flags.includes('Formula price likely too low') || d.classification === 'Dog').slice(0, 6);
   $('home-attention').innerHTML = risky.length
-    ? risky.map((d) => `<li><strong>${d.name}</strong>: ${d.classification}, FC ${d.foodCostPercent.toFixed(2)}% (target ${d.targetFoodCostPercent}%).</li>`).join('')
+    ? risky.map((d) => `<li><strong>${d.name}</strong>: ${d.flags.join(', ') || d.classification}. Final reco ${money(d.finalRecommendedPrice)} vs current ${money(d.currentSellingPrice || 0)}.</li>`).join('')
     : '<li>No urgent dish flags right now.</li>';
 }
 
 function actionForDish(d) {
-  if (d.foodCostPercent > d.targetFoodCostPercent + 5) return 'Reprice or reduce component cost';
+  if (d.flags.includes('Margin too weak')) return 'Raise price or reduce cost';
+  if (d.flags.includes('Formula price likely too low')) return 'Review market positioning';
   if (d.classification === 'Dog') return 'Test redesign or remove';
   if (d.classification === 'Puzzle') return 'Promote placement/visibility';
   if (d.classification === 'Plowhorse') return 'Try small price lift';
@@ -631,7 +747,18 @@ function actionForDish(d) {
 
 function renderAnalysis() {
   const dishes = classifyDishes(state.dishes.map((d) => ({ ...d, ...dishMetrics(d) })));
-  $('analysis-body').innerHTML = dishes.map((d) => `<tr><td>${d.name}</td><td>${d.classification}</td><td>${money(d.effectivePrice)}</td><td>${d.foodCostPercent.toFixed(2)}%</td><td>${d.unitsSold}</td><td>${money(d.revenue)}</td><td>${money(d.totalGrossProfit)}</td><td>${actionForDish(d)}</td></tr>`).join('') || '<tr><td colspan="8">No dishes available.</td></tr>';
+  $('analysis-body').innerHTML = dishes.map((d) => `<tr>
+    <td>${d.name}</td>
+    <td>${d.classification}</td>
+    <td>${money(d.formulaPrice)}</td>
+    <td>${money(d.finalRecommendedPrice)}</td>
+    <td>${money(d.currentSellingPrice || 0)}</td>
+    <td>${money(d.currentToFinalGap)}</td>
+    <td>${d.actualFoodCostAtFinal.toFixed(2)}%</td>
+    <td>${d.unitsSold}</td>
+    <td>${money((d.finalRecommendedPrice - d.totalPortionCost) * d.unitsSold)}</td>
+    <td>${actionForDish(d)}</td>
+  </tr>`).join('') || '<tr><td colspan="10">No dishes available.</td></tr>';
 }
 
 function createSnapshot() {
@@ -647,9 +774,11 @@ function createSnapshot() {
 function renderReports() {
   $('snap-list').innerHTML = state.snapshots.map((s) => `<li><strong>${s.name}</strong> (${s.periodLabel}) · ${new Date(s.createdAt).toLocaleString()} · ${s.items.length} dishes</li>`).join('') || '<li>No snapshots yet.</li>';
   const current = classifyDishes(state.dishes.map((d) => ({ ...d, ...dishMetrics(d) })));
-  const totalRev = current.reduce((a, b) => a + b.revenue, 0);
-  const totalGp = current.reduce((a, b) => a + b.totalGrossProfit, 0);
-  $('report-summary').innerHTML = `Current Dish Revenue: <strong>${money(totalRev)}</strong> · Current Dish GP: <strong>${money(totalGp)}</strong> · Snapshots: <strong>${state.snapshots.length}</strong>`;
+  const currentRev = current.reduce((a, b) => a + b.revenue, 0);
+  const recoRev = current.reduce((a, b) => a + b.recommendedRevenue, 0);
+  const currentGp = current.reduce((a, b) => a + b.totalGrossProfit, 0);
+  const recoGp = current.reduce((a, b) => a + b.recommendedTotalGp, 0);
+  $('report-summary').innerHTML = `Current Revenue: <strong>${money(currentRev)}</strong> · Revenue @ Final Reco: <strong>${money(recoRev)}</strong> · Current GP: <strong>${money(currentGp)}</strong> · GP @ Final Reco: <strong>${money(recoGp)}</strong> · Snapshots: <strong>${state.snapshots.length}</strong>`;
 }
 
 function renderWeekly() {
@@ -661,19 +790,8 @@ function renderWeekly() {
 function saveWeekly() {
   const selected = [...document.querySelectorAll('[data-weekly-dish]:checked')].map((el) => el.dataset.weeklyDish);
   const dishes = classifyDishes(state.dishes.map((d) => ({ ...d, ...dishMetrics(d) })));
-  const decisions = dishes.filter((d) => selected.includes(d.id)).map((d) => ({
-    dishId: d.id,
-    dishName: d.name,
-    classification: d.classification,
-    recommendedAction: actionForDish(d),
-  }));
-  state.weeklyReviews.unshift({
-    id: uid('wrev'),
-    name: `Weekly Review ${new Date().toLocaleDateString('en-GB')}`,
-    createdAt: now(),
-    notes: t($('weekly-notes').value),
-    decisions,
-  });
+  const decisions = dishes.filter((d) => selected.includes(d.id)).map((d) => ({ dishId: d.id, dishName: d.name, classification: d.classification, recommendedAction: actionForDish(d) }));
+  state.weeklyReviews.unshift({ id: uid('wrev'), name: `Weekly Review ${new Date().toLocaleDateString('en-GB')}`, createdAt: now(), notes: t($('weekly-notes').value), decisions });
   persist();
   renderWeekly();
 }
@@ -681,39 +799,33 @@ function saveWeekly() {
 function bindEvents() {
   $('mode-nav').addEventListener('click', (e) => {
     const tab = e.target.closest('[data-mode]');
-    if (!tab) return;
-    modeSwitch(tab.dataset.mode);
+    if (tab) modeSwitch(tab.dataset.mode);
   });
-
   document.body.addEventListener('click', (e) => {
     const jump = e.target.closest('[data-jump]');
-    if (!jump) return;
-    modeSwitch(jump.dataset.jump);
+    if (jump) modeSwitch(jump.dataset.jump);
   });
 
   $('ing-save').addEventListener('click', () => {
     const ingredient = normalizeIngredient({
-      id: state.editIngredientId || uid('ing'),
-      name: t($('ing-name').value),
-      purchasePrice: Math.max(0, n($('ing-price').value, 0)),
-      packSize: Math.max(0.0001, n($('ing-pack-size').value, 1)),
-      packUnit: $('ing-pack-unit').value,
-      supplier: t($('ing-supplier').value),
-      notes: t($('ing-notes').value),
+      id: state.editIngredientId || uid('ing'), name: t($('ing-name').value), purchasePrice: Math.max(0, n($('ing-price').value, 0)),
+      packSize: Math.max(0.0001, n($('ing-pack-size').value, 1)), packUnit: $('ing-pack-unit').value, supplier: t($('ing-supplier').value), notes: t($('ing-notes').value),
       createdAt: state.editIngredientId ? state.ingredients.find((i) => i.id === state.editIngredientId)?.createdAt || now() : now(),
     });
     if (!ingredient.name) return;
-    if (state.editIngredientId) state.ingredients = state.ingredients.map((i) => i.id === state.editIngredientId ? ingredient : i);
+    if (state.editIngredientId) state.ingredients = state.ingredients.map((i) => (i.id === state.editIngredientId ? ingredient : i));
     else state.ingredients.push(ingredient);
     state.editIngredientId = null;
     $('ing-reset').click();
     persist(); renderAll();
   });
+
   $('ing-reset').addEventListener('click', () => {
     state.editIngredientId = null;
-    ['ing-name', 'ing-price', 'ing-pack-size', 'ing-supplier', 'ing-notes'].forEach((id) => $(id).value = '');
+    ['ing-name', 'ing-price', 'ing-pack-size', 'ing-supplier', 'ing-notes'].forEach((id) => { $(id).value = ''; });
     $('ing-pack-unit').value = 'g';
   });
+
   $('ing-groups').addEventListener('click', (e) => {
     const toggle = e.target.closest('[data-supplier-toggle]');
     const edit = e.target.closest('[data-ing-edit]');
@@ -731,40 +843,16 @@ function bindEvents() {
       state.editIngredientId = i.id;
       $('ing-name').value = i.name; $('ing-price').value = i.purchasePrice; $('ing-pack-size').value = i.packSize;
       $('ing-pack-unit').value = i.packUnit; $('ing-supplier').value = i.supplier; $('ing-notes').value = i.notes;
-      $('ing-name').focus();
     }
-    if (del) {
-      state.ingredients = state.ingredients.filter((x) => x.id !== del.dataset.ingDel);
-      persist(); renderAll();
-    }
+    if (del) { state.ingredients = state.ingredients.filter((x) => x.id !== del.dataset.ingDel); persist(); renderAll(); }
   });
-  $('ing-search').addEventListener('input', (e) => {
-    state.ingredientUi.search = e.target.value;
-    renderIngredients();
-  });
-  $('ing-filter-supplier').addEventListener('change', (e) => {
-    state.ingredientUi.supplierFilter = e.target.value;
-    renderIngredients();
-  });
-  $('ing-clear-filters').addEventListener('click', () => {
-    state.ingredientUi.search = '';
-    state.ingredientUi.supplierFilter = 'all';
-    $('ing-search').value = '';
-    $('ing-filter-supplier').value = 'all';
-    renderIngredients();
-  });
-  $('ing-expand-all').addEventListener('click', () => {
-    state.ingredientUi.collapsedSuppliers.clear();
-    renderIngredients();
-  });
-  $('ing-collapse-all').addEventListener('click', () => {
-    groupedIngredients(filteredIngredients()).forEach((group) => state.ingredientUi.collapsedSuppliers.add(group.key));
-    renderIngredients();
-  });
-  $('ing-add-cta').addEventListener('click', () => {
-    $('ing-reset').click();
-    $('ing-name').focus();
-  });
+
+  $('ing-search').addEventListener('input', (e) => { state.ingredientUi.search = e.target.value; renderIngredients(); });
+  $('ing-filter-supplier').addEventListener('change', (e) => { state.ingredientUi.supplierFilter = e.target.value; renderIngredients(); });
+  $('ing-clear-filters').addEventListener('click', () => { state.ingredientUi.search = ''; state.ingredientUi.supplierFilter = 'all'; $('ing-search').value = ''; $('ing-filter-supplier').value = 'all'; renderIngredients(); });
+  $('ing-expand-all').addEventListener('click', () => { state.ingredientUi.collapsedSuppliers.clear(); renderIngredients(); });
+  $('ing-collapse-all').addEventListener('click', () => { groupedIngredients(filteredIngredients()).forEach((group) => state.ingredientUi.collapsedSuppliers.add(group.key)); renderIngredients(); });
+  $('ing-add-cta').addEventListener('click', () => { $('ing-reset').click(); $('ing-name').focus(); });
 
   $('rec-add-row').addEventListener('click', () => addRecipeRow());
   ['rec-name', 'rec-category', 'rec-yield-qty', 'rec-yield-unit', 'rec-notes'].forEach((id) => $(id).addEventListener('input', renderRecipeMetrics));
@@ -774,7 +862,7 @@ function bindEvents() {
     const m = recipeMetrics(r);
     r.totalBatchCost = m.totalBatchCost;
     r.costPerYieldUnit = m.costPerYieldUnit;
-    if (state.editRecipeId) state.recipes = state.recipes.map((x) => x.id === state.editRecipeId ? r : x);
+    if (state.editRecipeId) state.recipes = state.recipes.map((x) => (x.id === state.editRecipeId ? r : x));
     else state.recipes.push(r);
     setRecipeForm(null);
     persist(); renderAll();
@@ -784,18 +872,15 @@ function bindEvents() {
     const edit = e.target.closest('[data-rec-edit]');
     const del = e.target.closest('[data-rec-del]');
     if (edit) setRecipeForm(state.recipes.find((x) => x.id === edit.dataset.recEdit));
-    if (del) {
-      state.recipes = state.recipes.filter((x) => x.id !== del.dataset.recDel);
-      persist(); renderAll();
-    }
+    if (del) { state.recipes = state.recipes.filter((x) => x.id !== del.dataset.recDel); persist(); renderAll(); }
   });
 
   $('dish-add-row').addEventListener('click', () => addDishRow());
-  ['dish-name', 'dish-category', 'dish-active', 'dish-packaging', 'dish-target', 'dish-vat', 'dish-delivery', 'dish-rounding', 'dish-price', 'dish-manual', 'dish-units', 'dish-period', 'dish-notes'].forEach((id) => $(id).addEventListener('input', renderDishMetrics));
+  ['dish-name', 'dish-category', 'dish-active', 'dish-packaging', 'dish-target', 'dish-vat', 'dish-delivery', 'dish-rounding', 'dish-price', 'dish-manual', 'dish-units', 'dish-period', 'dish-notes', 'dish-pricing-strategy', 'dish-labour-intensity', 'dish-perceived-value', 'dish-menu-role', 'dish-market-low', 'dish-market-high', 'dish-min-price'].forEach((id) => $(id).addEventListener('input', renderDishMetrics));
   $('dish-save').addEventListener('click', () => {
     const d = readDishForm();
     if (!d.name) return;
-    if (state.editDishId) state.dishes = state.dishes.map((x) => x.id === state.editDishId ? d : x);
+    if (state.editDishId) state.dishes = state.dishes.map((x) => (x.id === state.editDishId ? d : x));
     else state.dishes.push(d);
     setDishForm(null);
     persist(); renderAll();
@@ -805,10 +890,7 @@ function bindEvents() {
     const edit = e.target.closest('[data-dish-edit]');
     const del = e.target.closest('[data-dish-del]');
     if (edit) setDishForm(state.dishes.find((x) => x.id === edit.dataset.dishEdit));
-    if (del) {
-      state.dishes = state.dishes.filter((x) => x.id !== del.dataset.dishDel);
-      persist(); renderAll();
-    }
+    if (del) { state.dishes = state.dishes.filter((x) => x.id !== del.dataset.dishDel); persist(); renderAll(); }
   });
 
   $('snap-create').addEventListener('click', createSnapshot);
