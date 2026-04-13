@@ -1,82 +1,123 @@
-# Menu Price Engine (Stage 1)
+# Menu Price Engine — Stage 2
 
-A practical internal pricing calculator for restaurant menu engineering at **Kiju**.
+Menu Price Engine Stage 2 is a static-file restaurant costing dashboard for **Kiju**.  
+It upgrades Stage 1 from a single calculator into a reusable internal costing system with an ingredient library and saved recipe management.
 
-This static web app helps teams quickly calculate suggested selling prices, compare margins, and test delivery-safe pricing for individual menu items.
+## Who this is for
 
-## What this tool does
+This tool is built for internal hospitality operations teams:
+- founders and managers
+- chefs and kitchen leads
+- menu engineering and profitability reviews
 
-The app accepts recipe and costing inputs, then instantly computes:
+It is not designed as a consumer product.
 
-- Total ingredient cost for the full recipe
-- Ingredient cost per portion
-- Total cost per portion (with packaging, and with packaging + labour)
-- Suggested net selling price from a target food cost %
-- Rounded suggested price using configurable rounding rules
-- VAT-inclusive price
-- Delivery-adjusted recommended price (commission aware)
-- Gross profit per portion
-- Actual food cost % at both rounded and manual prices
+## Stage 2 Features
 
-It also includes:
+### 1) Ingredient Library
+- Add, edit, delete ingredients
+- Store purchase price, pack size, pack unit, supplier, notes
+- Search ingredients by name
+- Case-insensitive duplicate protection
+- Persisted in `localStorage`
 
-- Dynamic ingredient rows (add/remove)
-- Validation warnings for invalid values/unit mismatches
-- Pricing insight guidance box
-- Local storage persistence (auto-save and auto-restore)
-- A realistic example loader (Chicken Banh Mi)
+### 2) Saved Recipe Management
+- Create, save, update, duplicate, and delete recipes
+- Search saved recipes
+- Sort and display by most recently updated
+- Restore full recipe editor state and ingredient rows
 
-## Run locally
+### 3) Snapshot-Safe Ingredient Rows
+- Recipe rows can link to library ingredients, then override values
+- Each saved row keeps snapshot data (name/price/pack/unit)
+- Recipe costing still works even if library entries later change or are deleted
 
-Because this is a static app, you can run it directly:
+### 4) Robust Calculation Engine
+- Unit conversion (`g/kg`, `ml/l`, `unit`)
+- Handles invalid conversions safely with warnings
+- Calculates:
+  - total ingredient cost
+  - cost per portion
+  - cost per portion with packaging/labour
+  - suggested net price
+  - rounded price
+  - VAT-inclusive price
+  - delivery-adjusted recommendation
+  - gross profit and actual food cost metrics
 
-1. Clone/download the repository
-2. Open `index.html` in your browser
+### 5) Pricing Insight Panel
+- Generates short business guidance based on calculated results
+- Highlights food cost pressure, delivery margin risk, and profitability signals
 
-Optional (recommended for consistent local behavior):
+### 6) Local Storage Persistence
+- Separate keys for ingredients, recipes, and active draft
+- Auto-save draft while editing
+- Restore draft and saved datasets on reload
+- Safe JSON parsing fallbacks to prevent crashes on corrupted storage values
+
+### 7) Sample Data Seeding
+If storage is empty, Stage 2 seeds realistic starter data:
+- Ingredient set including baguette, chicken thigh, sauces, greens, takeaway packaging, etc.
+- Two sample recipes:
+  - Chicken Banh Mi
+  - Chicken Salad Bowl
+
+## File Structure
+
+```text
+.
+├── index.html   # Dashboard markup (3-panel layout + ingredient library modal)
+├── style.css    # Dark professional styling and responsive behavior
+├── script.js    # State model, storage, validation, rendering, calculations
+└── README.md    # Project documentation
+```
+
+## Run Locally
+
+1. Clone or download this repository.
+2. Open `index.html` directly in a browser.
+
+Optional local server:
 
 ```bash
 python -m http.server 8000
 ```
 
-Then visit `http://localhost:8000`.
+Then open `http://localhost:8000`.
 
-## Deploy to GitHub Pages
+## GitHub Pages Deployment
 
-1. Push this repository to GitHub.
-2. In your repository settings, open **Pages**.
-3. Set source to the branch you want (commonly `main`) and folder `/ (root)`.
-4. Save and wait for deployment.
+1. Push repo to GitHub.
+2. In **Settings → Pages**, choose branch and root folder.
+3. Save and wait for deployment.
 
-Since this app uses only static files (`html/css/js`), it is fully GitHub Pages compatible.
+No build pipeline is required (pure static files).
 
-## File structure
+## localStorage Keys
 
-```text
-.
-├── index.html   # UI structure and app layout
-├── style.css    # Dark, professional responsive styling
-├── script.js    # Logic: calculations, validation, rendering, localStorage
-└── README.md    # Project documentation
-```
+- `mpe_v2_ingredients`
+- `mpe_v2_recipes`
+- `mpe_v2_active_draft`
+- `mpe_v2_seeded`
 
-## Stage 1 feature summary
+## Sample Data Behavior
 
-- Single-page internal tool interface
-- Mobile-friendly two-panel layout (stacks on small screens)
-- Ingredient cost engine with unit conversions (`g/kg`, `ml/l`, `unit`)
-- Configurable pricing controls (target %, VAT %, delivery %, rounding)
-- Instant results panel and practical pricing insights
-- Form reset and example dataset loading
-- Automatic state persistence via `localStorage`
+Sample data is only auto-seeded when all storage is empty and no seed flag exists.  
+After first seed, user data is preserved across reloads.
 
-## Stage 2 expansion ideas
+## Current Stage 2 Limitations
 
-- Multi-item library with saved menu items
-- Category-level margin dashboards
-- CSV import/export for recipe costing
-- Daypart/channel pricing modes (dine-in, takeaway, delivery)
-- User roles and approval workflow (when backend is introduced)
-- Ingredient master data and supplier price versioning
-- Printable costing sheets and reporting exports
+- Single-user browser-local data only
+- No cloud sync / team collaboration
+- No import/export CSV yet
+- No authentication or approval workflow
+- No historical ingredient price versioning
 
+## Suggested Stage 3 Roadmap
+
+- CSV/Excel import-export for ingredients and recipes
+- multi-channel pricing profiles (dine-in / takeaway / delivery)
+- margin analytics dashboard across all recipes
+- change logs / audit trail
+- optional backend sync for shared team access
+- batch costing updates from supplier price changes

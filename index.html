@@ -3,161 +3,230 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Menu Price Engine</title>
+    <title>Menu Price Engine — Stage 2</title>
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
     <div class="app-shell">
-      <header class="page-header">
-        <h1>Menu Price Engine</h1>
-        <p>Stage 1 pricing calculator for Kiju</p>
+      <header class="app-header card">
+        <div>
+          <h1>Menu Price Engine</h1>
+          <p>Kiju internal costing dashboard · Stage 2</p>
+        </div>
+        <button id="open-library-btn" class="btn btn-accent" type="button">Open Ingredient Library</button>
       </header>
 
-      <main class="layout-grid">
-        <section class="panel input-panel" aria-label="Pricing inputs">
-          <form id="pricing-form" novalidate>
-            <div class="section-title-row">
-              <h2>Item Details</h2>
-            </div>
-            <div class="field-grid two-col">
-              <label class="field">
-                <span>Item name</span>
-                <input id="item-name" name="itemName" type="text" placeholder="e.g. Chicken Banh Mi" />
-              </label>
-              <label class="field">
-                <span>Category (optional)</span>
-                <input id="item-category" name="itemCategory" type="text" placeholder="e.g. Sandwich" />
-              </label>
-            </div>
+      <main class="dashboard-grid">
+        <aside class="panel card" aria-label="Saved recipes panel">
+          <div class="panel-head">
+            <h2>Saved Recipes</h2>
+            <span id="recipe-count" class="count-pill">0</span>
+          </div>
+          <label class="field">
+            <span>Search Recipes</span>
+            <input id="recipe-search" type="search" placeholder="Search by recipe name" />
+          </label>
+          <button id="new-recipe-btn" class="btn btn-secondary" type="button">New Recipe</button>
+          <ul id="recipe-list" class="recipe-list"></ul>
+        </aside>
 
-            <div class="section-title-row">
-              <h2>Recipe Setup</h2>
-            </div>
-            <div class="field-grid one-col">
-              <label class="field">
-                <span>Portions yielded by recipe</span>
-                <input id="portions" name="portions" type="number" min="0.01" step="0.01" value="1" required />
-              </label>
-            </div>
+        <section class="panel card" aria-label="Recipe editor panel">
+          <div class="panel-head">
+            <h2>Recipe Editor</h2>
+            <span id="draft-state" class="meta-text">Draft autosave enabled</span>
+          </div>
 
-            <div class="section-title-row with-action">
-              <h2>Ingredients</h2>
-              <button type="button" id="add-ingredient" class="btn btn-secondary">Add ingredient row</button>
-            </div>
+          <div id="editor-errors" class="inline-errors" aria-live="polite"></div>
 
-            <div class="ingredient-table-wrap">
-              <table class="ingredient-table" id="ingredient-table">
-                <thead>
-                  <tr>
-                    <th>Ingredient</th>
-                    <th>Pack price (£)</th>
-                    <th>Pack size</th>
-                    <th>Pack unit</th>
-                    <th>Amount used</th>
-                    <th>Use unit</th>
-                    <th>Cost used</th>
-                    <th>Action</th>
-                  </tr>
-                </thead>
-                <tbody id="ingredients-body"></tbody>
-              </table>
-            </div>
+          <div class="field-grid two-col">
+            <label class="field">
+              <span>Recipe Name *</span>
+              <input id="recipe-name" type="text" placeholder="e.g. Chicken Banh Mi" />
+            </label>
+            <label class="field">
+              <span>Category</span>
+              <input id="recipe-category" type="text" placeholder="e.g. Sandwich" />
+            </label>
+            <label class="field">
+              <span>Portions Yielded *</span>
+              <input id="portions-yielded" type="number" min="0.01" step="0.01" value="10" />
+            </label>
+            <label class="field">
+              <span>Target Food Cost % *</span>
+              <input id="target-food-cost" type="number" min="0.01" max="99.99" step="0.01" value="30" />
+            </label>
+            <label class="field">
+              <span>Packaging Cost / Portion (£)</span>
+              <input id="packaging-cost" type="number" min="0" step="0.01" value="0" />
+            </label>
+            <label class="field">
+              <span>Labour Cost / Portion (£)</span>
+              <input id="labour-cost" type="number" min="0" step="0.01" value="0" />
+            </label>
+            <label class="field">
+              <span>VAT Rate %</span>
+              <input id="vat-rate" type="number" min="0" step="0.01" value="20" />
+            </label>
+            <label class="field">
+              <span>Delivery Commission %</span>
+              <input id="delivery-commission" type="number" min="0" step="0.01" value="30" />
+            </label>
+            <label class="field">
+              <span>Rounding Rule</span>
+              <select id="rounding-rule">
+                <option value="0.1">Nearest 0.10</option>
+                <option value="0.25">Nearest 0.25</option>
+                <option value="0.5">Nearest 0.50</option>
+                <option value="1">Nearest 1.00</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Manual Menu Price (£)</span>
+              <input id="manual-price" type="number" min="0" step="0.01" placeholder="Optional" />
+            </label>
+          </div>
 
-            <div class="section-title-row">
-              <h2>Extra Costs</h2>
-            </div>
-            <div class="field-grid two-col">
-              <label class="field">
-                <span>Packaging cost per portion (£)</span>
-                <input id="packaging-cost" name="packagingCost" type="number" min="0" step="0.01" value="0" />
-              </label>
-              <label class="field">
-                <span>Labour cost per portion (£) (optional)</span>
-                <input id="labour-cost" name="labourCost" type="number" min="0" step="0.01" value="0" />
-              </label>
-            </div>
+          <div class="section-head with-action">
+            <h3>Ingredient Rows</h3>
+            <button id="add-row-btn" class="btn btn-secondary" type="button">Add Ingredient Row</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Library Ingredient</th>
+                  <th>Ingredient Name</th>
+                  <th>Price £</th>
+                  <th>Pack Size</th>
+                  <th>Pack Unit</th>
+                  <th>Amount Used</th>
+                  <th>Use Unit</th>
+                  <th>Cost Used</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="ingredient-rows"></tbody>
+            </table>
+          </div>
 
-            <div class="section-title-row">
-              <h2>Pricing Controls</h2>
-            </div>
-            <div class="field-grid two-col">
-              <label class="field">
-                <span>Target food cost %</span>
-                <input id="target-food-cost" name="targetFoodCost" type="number" min="0.01" max="99.99" step="0.01" value="28" />
-              </label>
-              <label class="field">
-                <span>VAT rate %</span>
-                <input id="vat-rate" name="vatRate" type="number" min="0" max="100" step="0.01" value="20" />
-              </label>
-              <label class="field">
-                <span>Delivery commission %</span>
-                <input id="delivery-commission" name="deliveryCommission" type="number" min="0" max="99.99" step="0.01" value="30" />
-              </label>
-              <label class="field">
-                <span>Rounding rule</span>
-                <select id="rounding-rule" name="roundingRule">
-                  <option value="0.1">Nearest £0.10</option>
-                  <option value="0.25">Nearest £0.25</option>
-                  <option value="0.5">Nearest £0.50</option>
-                  <option value="1">Nearest £1.00</option>
-                </select>
-              </label>
-            </div>
-
-            <div class="section-title-row">
-              <h2>Manual Comparison (Optional)</h2>
-            </div>
-            <div class="field-grid one-col">
-              <label class="field">
-                <span>Manual menu price (£)</span>
-                <input id="manual-price" name="manualPrice" type="number" min="0" step="0.01" placeholder="Enter your current menu price" />
-              </label>
-            </div>
-
-            <div id="warnings" class="warnings" role="alert" aria-live="polite"></div>
-
-            <div class="button-row">
-              <button type="button" id="load-example" class="btn btn-secondary">Load example data</button>
-              <button type="button" id="reset-form" class="btn btn-danger">Reset form</button>
-            </div>
-          </form>
+          <div class="button-row">
+            <button id="save-recipe-btn" class="btn btn-accent" type="button">Save Recipe</button>
+            <button id="update-recipe-btn" class="btn" type="button">Update Recipe</button>
+            <button id="duplicate-recipe-btn" class="btn" type="button">Duplicate Recipe</button>
+            <button id="delete-recipe-btn" class="btn btn-danger" type="button">Delete Recipe</button>
+            <button id="reset-form-btn" class="btn btn-secondary" type="button">Reset Current Form</button>
+          </div>
         </section>
 
-        <aside class="panel results-panel" aria-label="Pricing results">
-          <h2>Results</h2>
-          <div class="result-list" id="result-list">
-            <div class="result-item"><span>Total ingredient cost (recipe)</span><strong id="res-total-ingredient">£0.00</strong></div>
-            <div class="result-item"><span>Ingredient cost per portion</span><strong id="res-ingredient-portion">£0.00</strong></div>
-            <div class="result-item"><span>Total cost per portion (incl. packaging)</span><strong id="res-total-portion">£0.00</strong></div>
-            <div class="result-item"><span>Total cost per portion (incl. packaging + labour)</span><strong id="res-total-portion-labour">£0.00</strong></div>
+        <aside class="panel card" aria-label="Results panel">
+          <div class="panel-head">
+            <h2>Pricing Results</h2>
+          </div>
+          <div class="results-grid" id="results-grid">
+            <div class="result-item"><span>Total ingredient cost</span><strong id="res-total-ingredient">£0.00</strong></div>
+            <div class="result-item"><span>Ingredient cost / portion</span><strong id="res-ingredient-portion">£0.00</strong></div>
+            <div class="result-item"><span>Total cost / portion (excl labour)</span><strong id="res-total-portion">£0.00</strong></div>
+            <div class="result-item"><span>Total cost / portion (incl labour)</span><strong id="res-total-labour">£0.00</strong></div>
             <div class="result-item"><span>Suggested net selling price</span><strong id="res-suggested-net">£0.00</strong></div>
-            <div class="result-item"><span>Rounded suggested selling price</span><strong id="res-rounded">£0.00</strong></div>
+            <div class="result-item"><span>Rounded selling price</span><strong id="res-rounded">£0.00</strong></div>
             <div class="result-item"><span>VAT-inclusive price</span><strong id="res-vat">£0.00</strong></div>
-            <div class="result-item">
-              <span>Delivery-adjusted recommended price</span>
-              <strong id="res-delivery">£0.00</strong>
-              <small>(Maintains net revenue after commission)</small>
-            </div>
-            <div class="result-item"><span>Gross profit per portion (rounded price)</span><strong id="res-gross-profit">£0.00</strong></div>
-            <div class="result-item"><span>Actual food cost % (rounded price)</span><strong id="res-food-cost-rounded">0.00%</strong></div>
-            <div class="result-item"><span>Actual food cost % (manual price)</span><strong id="res-food-cost-manual">—</strong></div>
+            <div class="result-item"><span>Delivery-adjusted recommendation</span><strong id="res-delivery">£0.00</strong></div>
+            <div class="result-item"><span>Gross profit / portion</span><strong id="res-gross">£0.00</strong></div>
+            <div class="result-item"><span>Actual food cost % (rounded)</span><strong id="res-food-rounded">0.00%</strong></div>
+            <div class="result-item"><span>Actual food cost % (manual)</span><strong id="res-food-manual">—</strong></div>
           </div>
 
-          <div class="insight-box" id="pricing-insight">
+          <div class="insight-card">
             <h3>Pricing Insight</h3>
-            <p id="insight-text">Enter recipe data to see pricing guidance.</p>
+            <ul id="insight-list"></ul>
           </div>
+          <div id="calc-warnings" class="inline-errors" aria-live="polite"></div>
         </aside>
       </main>
     </div>
 
+    <div id="library-modal" class="modal" aria-hidden="true">
+      <div class="modal-backdrop" data-close-modal="true"></div>
+      <div class="modal-panel card" role="dialog" aria-modal="true" aria-labelledby="library-title">
+        <div class="panel-head">
+          <h2 id="library-title">Ingredient Library</h2>
+          <button id="close-library-btn" class="btn" type="button">Close</button>
+        </div>
+
+        <div id="library-errors" class="inline-errors" aria-live="polite"></div>
+
+        <div class="field-grid three-col">
+          <label class="field">
+            <span>Name *</span>
+            <input id="lib-name" type="text" placeholder="Ingredient name" />
+          </label>
+          <label class="field">
+            <span>Purchase Price (£) *</span>
+            <input id="lib-price" type="number" min="0" step="0.01" />
+          </label>
+          <label class="field">
+            <span>Pack Size *</span>
+            <input id="lib-pack-size" type="number" min="0.0001" step="0.0001" />
+          </label>
+          <label class="field">
+            <span>Pack Unit *</span>
+            <select id="lib-pack-unit">
+              <option value="">Select unit</option>
+              <option value="g">g</option>
+              <option value="kg">kg</option>
+              <option value="ml">ml</option>
+              <option value="l">l</option>
+              <option value="unit">unit</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Supplier</span>
+            <input id="lib-supplier" type="text" placeholder="Optional" />
+          </label>
+          <label class="field">
+            <span>Notes</span>
+            <input id="lib-notes" type="text" placeholder="Optional" />
+          </label>
+        </div>
+
+        <div class="button-row">
+          <button id="add-ingredient-btn" class="btn btn-accent" type="button">Add Ingredient</button>
+          <button id="update-ingredient-btn" class="btn" type="button">Update Ingredient</button>
+          <button id="clear-ingredient-form-btn" class="btn btn-secondary" type="button">Clear Form</button>
+          <span id="ingredient-count" class="count-pill">0</span>
+        </div>
+
+        <label class="field">
+          <span>Search Ingredients</span>
+          <input id="ingredient-search" type="search" placeholder="Search ingredient" />
+        </label>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Price £</th>
+                <th>Pack</th>
+                <th>Supplier</th>
+                <th>Notes</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="ingredient-library-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
     <template id="ingredient-row-template">
-      <tr class="ingredient-row">
-        <td><input type="text" class="ing-name" placeholder="Ingredient" /></td>
-        <td><input type="number" class="ing-pack-price" min="0" step="0.01" value="0" /></td>
-        <td><input type="number" class="ing-pack-size" min="0.0001" step="0.0001" value="1" /></td>
+      <tr>
+        <td><select class="row-lib-select"></select></td>
+        <td><input class="row-name" type="text" /></td>
+        <td><input class="row-price" type="number" min="0" step="0.01" /></td>
+        <td><input class="row-pack-size" type="number" min="0.0001" step="0.0001" /></td>
         <td>
-          <select class="ing-pack-unit">
+          <select class="row-pack-unit">
             <option value="g">g</option>
             <option value="kg">kg</option>
             <option value="ml">ml</option>
@@ -165,9 +234,9 @@
             <option value="unit">unit</option>
           </select>
         </td>
-        <td><input type="number" class="ing-amount-used" min="0" step="0.0001" value="0" /></td>
+        <td><input class="row-amount" type="number" min="0" step="0.0001" /></td>
         <td>
-          <select class="ing-use-unit">
+          <select class="row-use-unit">
             <option value="g">g</option>
             <option value="kg">kg</option>
             <option value="ml">ml</option>
@@ -175,8 +244,8 @@
             <option value="unit">unit</option>
           </select>
         </td>
-        <td><output class="ing-cost-used">£0.00</output></td>
-        <td><button type="button" class="btn btn-icon remove-ingredient" aria-label="Remove ingredient row">✕</button></td>
+        <td><output class="row-cost">£0.00</output></td>
+        <td><button type="button" class="btn btn-icon row-remove">Remove</button></td>
       </tr>
     </template>
 
