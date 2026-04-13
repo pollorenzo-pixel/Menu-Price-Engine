@@ -306,7 +306,7 @@ function supplierKey(supplierName) {
 }
 
 function supplierLabel(supplierName) {
-  return t(supplierName) || 'No Supplier';
+  return t(supplierName) || 'Unassigned supplier';
 }
 
 function ingredientMatchesSearch(ingredient, searchTerm) {
@@ -336,8 +336,8 @@ function groupedIngredients(items) {
     items: group.items.sort((a, b) => a.name.localeCompare(b.name)),
   }));
   groups.sort((a, b) => {
-    if (a.key === '__unassigned__') return 1;
-    if (b.key === '__unassigned__') return -1;
+    if (a.key === '__unassigned__') return -1;
+    if (b.key === '__unassigned__') return 1;
     return a.label.localeCompare(b.label);
   });
   return groups;
@@ -360,29 +360,47 @@ function renderIngredients() {
   renderIngredientSupplierFilter();
 
   if (!groups.length) {
-    $('ing-groups').innerHTML = '<p class="muted ingredient-empty">No ingredients match your current search/filter.</p>';
+    const supplierText = state.ingredientUi.supplierFilter === 'all'
+      ? 'all suppliers'
+      : (groupedIngredients(state.ingredients).find((g) => g.key === state.ingredientUi.supplierFilter)?.label || 'selected supplier');
+    const hasSearch = t(state.ingredientUi.search).length > 0;
+    $('ing-groups').innerHTML = `<p class="muted ingredient-empty">No ingredients found for ${supplierText}${hasSearch ? ` with search “${t(state.ingredientUi.search)}”` : ''}.</p>`;
     return;
   }
 
   $('ing-groups').innerHTML = groups.map((group) => {
     const collapsed = state.ingredientUi.collapsedSuppliers.has(group.key);
-    return `<section class="supplier-group">
-      <button class="supplier-group__header" data-supplier-toggle="${group.key}" aria-expanded="${(!collapsed).toString()}">
-        <span class="supplier-group__title">${group.label}</span>
-        <span class="supplier-group__meta">${group.items.length} ingredient${group.items.length === 1 ? '' : 's'}</span>
+    const bodyId = `supplier-panel-${group.key}`;
+    const isUnassigned = group.key === '__unassigned__';
+    return `<section class="supplier-group${isUnassigned ? ' supplier-group--unassigned' : ''}">
+      <button class="supplier-group__header" type="button" data-supplier-toggle="${group.key}" aria-controls="${bodyId}" aria-expanded="${(!collapsed).toString()}">
+        <span class="supplier-group__left">
+          <span class="supplier-group__title">${group.label}</span>
+          <span class="supplier-group__hint">${isUnassigned ? 'Needs supplier assignment for cleaner purchasing workflows.' : 'Supplier section'}</span>
+        </span>
+        <span class="supplier-group__right">
+          <span class="supplier-group__meta">${group.items.length} ingredient${group.items.length === 1 ? '' : 's'}</span>
+          <span class="supplier-group__chevron">⌄</span>
+        </span>
       </button>
-      <div class="supplier-group__content" ${collapsed ? 'hidden' : ''}>
+      <div id="${bodyId}" class="supplier-group__body ${collapsed ? 'is-collapsed' : ''}">
+      <div class="supplier-group__content">
         ${group.items.map((i) => `<article class="ingredient-card">
           <div class="ingredient-card__main">
             <strong>${i.name}</strong>
-            <span class="muted">${i.packSize} ${i.packUnit} · ${money(i.purchasePrice)}</span>
-            <span class="muted">${supplierLabel(i.supplier)}</span>
+            <div class="ingredient-card__meta">
+              <span class="chip">${i.packSize} ${i.packUnit}</span>
+              <span class="chip">${money(i.purchasePrice)}</span>
+              ${isUnassigned ? '<span class="chip">Unassigned</span>' : ''}
+            </div>
+            ${i.notes ? `<span class="muted">${i.notes}</span>` : ''}
           </div>
           <div class="ingredient-card__actions">
-            <button class="btn" data-ing-edit="${i.id}">Edit</button>
-            <button class="btn danger" data-ing-del="${i.id}">Delete</button>
+            <button class="btn" type="button" data-ing-edit="${i.id}">Edit</button>
+            <button class="btn danger" type="button" data-ing-del="${i.id}">Delete</button>
           </div>
         </article>`).join('')}
+      </div>
       </div>
     </section>`;
   }).join('');
@@ -726,6 +744,13 @@ function bindEvents() {
   });
   $('ing-filter-supplier').addEventListener('change', (e) => {
     state.ingredientUi.supplierFilter = e.target.value;
+    renderIngredients();
+  });
+  $('ing-clear-filters').addEventListener('click', () => {
+    state.ingredientUi.search = '';
+    state.ingredientUi.supplierFilter = 'all';
+    $('ing-search').value = '';
+    $('ing-filter-supplier').value = 'all';
     renderIngredients();
   });
   $('ing-expand-all').addEventListener('click', () => {
