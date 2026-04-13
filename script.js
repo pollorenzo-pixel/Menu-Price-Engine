@@ -120,6 +120,10 @@ function normalizeRecipe(raw = {}) {
 
 function normalizeDish(raw = {}) {
   const componentsRaw = Array.isArray(raw.components) ? raw.components : [];
+  const parsedMarketLow = n(raw.marketLowPrice, NaN) > 0 ? n(raw.marketLowPrice) : null;
+  const parsedMarketHigh = n(raw.marketHighPrice, NaN) > 0 ? n(raw.marketHighPrice) : null;
+  const marketLowPrice = parsedMarketLow && parsedMarketHigh ? Math.min(parsedMarketLow, parsedMarketHigh) : parsedMarketLow;
+  const marketHighPrice = parsedMarketLow && parsedMarketHigh ? Math.max(parsedMarketLow, parsedMarketHigh) : parsedMarketHigh;
   return {
     id: t(raw.id) || uid('dish'),
     name: t(raw.name),
@@ -148,8 +152,8 @@ function normalizeDish(raw = {}) {
     labourIntensity: LABOUR_OPTIONS.includes(raw.labourIntensity) ? raw.labourIntensity : 'Medium',
     perceivedValue: VALUE_OPTIONS.includes(raw.perceivedValue) ? raw.perceivedValue : 'Medium',
     menuRole: MENU_ROLES.includes(raw.menuRole) ? raw.menuRole : 'Core Main',
-    marketLowPrice: n(raw.marketLowPrice, NaN) > 0 ? n(raw.marketLowPrice) : null,
-    marketHighPrice: n(raw.marketHighPrice, NaN) > 0 ? n(raw.marketHighPrice) : null,
+    marketLowPrice,
+    marketHighPrice,
     minimumAcceptablePrice: n(raw.minimumAcceptablePrice, NaN) > 0 ? n(raw.minimumAcceptablePrice) : null,
     createdAt: t(raw.createdAt) || now(),
     updatedAt: now(),
@@ -203,9 +207,21 @@ function pricingIntelligence(dish, portionCost, formulaPrice) {
   const roleAdj = ROLE_UPLIFT[dish.menuRole] ?? 0;
 
   const strategicBase = formulaPrice * (1 + labourAdj + valueAdj + roleAdj);
-  let strategicRecommendedPrice = (formulaPrice * strategy.formula) + (marketMid * strategy.market) + (strategicBase * strategy.strategic);
+  const strategicPremium = strategicBase - formulaPrice;
+  const marketPull = marketMid - formulaPrice;
+  let strategicRecommendedPrice = formulaPrice + (marketPull * strategy.market) + (strategicPremium * strategy.strategic);
 
-  if (dish.pricingStrategy === 'Margin Driver' && strategicRecommendedPrice < formulaPrice * 1.15) strategicRecommendedPrice = formulaPrice * 1.15;
+  if (marketLow && marketHigh) {
+    const lowerBound = marketLow * 0.92;
+    const upperBound = marketHigh * 1.08;
+    strategicRecommendedPrice = Math.min(Math.max(strategicRecommendedPrice, lowerBound), upperBound);
+  }
+
+  const contributionFloorByRole = dish.menuRole === 'Side / Add-On' || dish.menuRole === 'High Margin Support' ? 3.25 : 2.2;
+  const contributionFloorByValue = dish.perceivedValue === 'High' ? 2.9 : 2.2;
+  const contributionFloor = Math.max(contributionFloorByRole, contributionFloorByValue);
+
+  if (dish.pricingStrategy === 'Margin Driver' && strategicRecommendedPrice < (portionCost + contributionFloor)) strategicRecommendedPrice = portionCost + contributionFloor;
   if (dish.pricingStrategy === 'Premium Signature' && strategicRecommendedPrice < formulaPrice * 1.1) strategicRecommendedPrice = formulaPrice * 1.1;
   if (dish.pricingStrategy === 'Traffic Builder') strategicRecommendedPrice *= 0.98;
 
@@ -222,30 +238,30 @@ function pricingIntelligence(dish, portionCost, formulaPrice) {
 
   const rationale = [];
   const flags = [];
-  if (dish.pricingStrategy === 'Margin Driver') rationale.push('Recommendation is lifted above formula pricing because this item is marked as a margin driver.');
-  if (dish.pricingStrategy === 'Traffic Builder') rationale.push('Traffic Builder strategy keeps pricing tighter, but margin should be monitored.');
-  if (dish.pricingStrategy === 'Premium Signature') rationale.push('Premium Signature positioning supports a stronger selling price than formula alone.');
-  if (labourAdj > 0 || valueAdj > 0) rationale.push(`${dish.labourIntensity} labour and ${dish.perceivedValue.toLowerCase()} perceived value influence strategic pricing.`);
+  if (dish.pricingStrategy === 'Margin Driver') rationale.push('Margin Driver holds extra contribution instead of hugging formula.');
+  if (dish.pricingStrategy === 'Traffic Builder') rationale.push('Traffic Builder keeps price tight to protect volume.');
+  if (dish.pricingStrategy === 'Premium Signature') rationale.push('Premium Signature supports a stronger price than cost-only logic.');
+  if (labourAdj > 0 || valueAdj > 0) rationale.push(`${dish.labourIntensity} effort and ${dish.perceivedValue.toLowerCase()} guest value lift the target price.`);
+  if (marketLow && marketHigh) rationale.push(`Market anchor set at ${money(marketLow)}–${money(marketHigh)}.`);
   if (marketLow && formulaPrice < marketLow * 0.9) {
-    rationale.push('Market pricing suggests the formula price is too low for this category.');
-    flags.push('Formula price likely too low');
-    flags.push('Price below market range');
+    rationale.push('Cost formula alone sits below typical market pricing.');
+    flags.push('Under market');
   }
   if (marketHigh && formulaPrice > marketHigh * 1.1) {
-    rationale.push('Formula price sits above the observed market range and may need positioning review.');
-    flags.push('Price above market range');
+    rationale.push('Cost formula sits above observed market pricing.');
+    flags.push('Over market');
   }
-  if (actualFoodCostAtFinal > Math.max(dish.targetFoodCostPercent + 3, 40)) flags.push('Margin too weak');
+  if (actualFoodCostAtFinal > Math.max(dish.targetFoodCostPercent + 3, 40)) flags.push('Margin risk');
   if (actualFoodCostAtFinal < 22) {
-    flags.push('Strong margin opportunity');
-    if (dish.pricingStrategy === 'Margin Driver' || dish.pricingStrategy === 'Premium Signature') rationale.push('Lower food cost % is acceptable here because the dish is positioned as a margin-focused item.');
+    flags.push('Strong margin');
+    if (dish.pricingStrategy === 'Margin Driver' || dish.pricingStrategy === 'Premium Signature') rationale.push('Low food cost is intentional for this role.');
   }
-  if (dish.labourIntensity === 'High') flags.push('Review labour burden');
-  if (dish.menuRole === 'Side / Add-On' || dish.menuRole === 'High Margin Support') flags.push('Suitable for upsell / add-on pricing');
-  if (dish.perceivedValue === 'High' && dish.labourIntensity === 'High') flags.push('Premium positioning supported');
+  if (dish.labourIntensity === 'High' && actualFoodCostAtFinal > dish.targetFoodCostPercent + 2) flags.push('Labour-heavy item');
+  if ((dish.menuRole === 'Side / Add-On' || dish.menuRole === 'High Margin Support') && actualFoodCostAtFinal < 30) flags.push('Good upsell support');
+  if (dish.perceivedValue === 'High' && dish.labourIntensity === 'High' && !flags.includes('Over market')) flags.push('Premium position fits');
 
   const minContributionThreshold = dish.pricingStrategy === 'Traffic Builder' ? 2 : 3;
-  if ((finalRecommendedPrice - portionCost) < minContributionThreshold) flags.push('Contribution margin below threshold');
+  if ((finalRecommendedPrice - portionCost) < minContributionThreshold) flags.push('Low contribution');
 
   const confidence = Math.min(95, 52
     + (marketLow && marketHigh ? 20 : 0)
@@ -261,8 +277,8 @@ function pricingIntelligence(dish, portionCost, formulaPrice) {
     strategicRecommendedPrice,
     finalRecommendedPrice,
     actualFoodCostAtFinal,
-    rationale: rationale.length ? rationale : ['Recommendation balances formula cost, dish strategy, and operating realities.'],
-    flags: [...new Set(flags)],
+    rationale: rationale.length ? rationale.slice(0, 3) : ['Balanced using cost, strategy, and market context.'],
+    flags: [...new Set(flags)].slice(0, 4),
     confidence,
     strategicFloor,
   };
@@ -661,18 +677,16 @@ function renderDishMetrics() {
       <div><span>Portion Cost</span><strong>${money(metrics.totalPortionCost)}</strong></div>
       <div><span>Formula Price</span><strong>${money(metrics.formulaPrice)}</strong></div>
       <div><span>Market-Guided Range</span><strong>${marketRange}</strong></div>
-      <div><span>Strategic Recommended</span><strong>${money(metrics.strategicRecommendedPrice)}</strong></div>
       <div><span>Final Recommended</span><strong class="highlight">${money(metrics.finalRecommendedPrice)}</strong></div>
       <div><span>Food Cost % @ Final</span><strong>${metrics.actualFoodCostAtFinal.toFixed(2)}%</strong></div>
       <div><span>Confidence</span><strong>${metrics.confidence}%</strong></div>
-      <div><span>Current vs Final Gap</span><strong>${money(metrics.currentToFinalGap)}</strong></div>
-      <div><span>Formula vs Final Gap</span><strong>${money(metrics.formulaToFinalGap)}</strong></div>
+      <div><span>Price Gap vs Current</span><strong>${money(metrics.currentToFinalGap)}</strong></div>
     </div>
     <div class="rationale-block">
       <h4>Pricing Rationale</h4>
       <ul>${metrics.rationale.map((line) => `<li>${line}</li>`).join('')}</ul>
       <h4>Pricing Flags</h4>
-      <p>${metrics.flags.length ? metrics.flags.join(' · ') : 'No pricing flags.'}</p>
+      <p>${metrics.flags.length ? metrics.flags.join(' · ') : 'No active flags.'}</p>
     </div>
   `;
 }
@@ -730,15 +744,15 @@ function renderHome() {
     ['GP @ Final Reco', money(totals.recommendedGp)],
   ].map(([k, v]) => `<div class="kpi"><span>${k}</span><strong>${v}</strong></div>`).join('');
 
-  const risky = dishes.filter((d) => d.flags.includes('Margin too weak') || d.flags.includes('Formula price likely too low') || d.classification === 'Dog').slice(0, 6);
+  const risky = dishes.filter((d) => d.flags.includes('Margin risk') || d.flags.includes('Under market') || d.classification === 'Dog').slice(0, 6);
   $('home-attention').innerHTML = risky.length
     ? risky.map((d) => `<li><strong>${d.name}</strong>: ${d.flags.join(', ') || d.classification}. Final reco ${money(d.finalRecommendedPrice)} vs current ${money(d.currentSellingPrice || 0)}.</li>`).join('')
     : '<li>No urgent dish flags right now.</li>';
 }
 
 function actionForDish(d) {
-  if (d.flags.includes('Margin too weak')) return 'Raise price or reduce cost';
-  if (d.flags.includes('Formula price likely too low')) return 'Review market positioning';
+  if (d.flags.includes('Margin risk')) return 'Raise price or reduce cost';
+  if (d.flags.includes('Under market')) return 'Review market positioning';
   if (d.classification === 'Dog') return 'Test redesign or remove';
   if (d.classification === 'Puzzle') return 'Promote placement/visibility';
   if (d.classification === 'Plowhorse') return 'Try small price lift';

@@ -120,43 +120,58 @@
           </div>
 
           <h3>Pricing Intelligence</h3>
-          <div class="grid three intelligence-grid">
-            <label>Pricing Strategy
-              <select id="dish-pricing-strategy">
-                <option>Standard</option>
-                <option>Market-Based</option>
-                <option>Margin Driver</option>
-                <option>Traffic Builder</option>
-                <option>Premium Signature</option>
-              </select>
-            </label>
-            <label>Labour Intensity
-              <select id="dish-labour-intensity">
-                <option>Low</option>
-                <option selected>Medium</option>
-                <option>High</option>
-              </select>
-            </label>
-            <label>Perceived Value
-              <select id="dish-perceived-value">
-                <option>Low</option>
-                <option selected>Medium</option>
-                <option>High</option>
-              </select>
-            </label>
-            <label>Menu Role
-              <select id="dish-menu-role">
-                <option>Core Main</option>
-                <option>Side / Add-On</option>
-                <option>Signature Item</option>
-                <option>Combo Driver</option>
-                <option>Traffic Builder</option>
-                <option>High Margin Support</option>
-              </select>
-            </label>
-            <label>Market Low Price £<input id="dish-market-low" type="number" step="0.01" min="0" /></label>
-            <label>Market High Price £<input id="dish-market-high" type="number" step="0.01" min="0" /></label>
-            <label>Minimum Acceptable Price £<input id="dish-min-price" type="number" step="0.01" min="0" /></label>
+          <p class="muted intelligence-intro">Set how this dish should behave commercially, then optionally anchor it to market prices.</p>
+          <div class="intelligence-grid">
+            <div class="intelligence-group">
+              <h4>Positioning</h4>
+              <div class="grid three compact-grid">
+                <label>Pricing Strategy
+                  <select id="dish-pricing-strategy">
+                    <option>Standard</option>
+                    <option>Market-Based</option>
+                    <option>Margin Driver</option>
+                    <option>Traffic Builder</option>
+                    <option>Premium Signature</option>
+                  </select>
+                  <small>How assertive pricing should be.</small>
+                </label>
+                <label>Labour Intensity
+                  <select id="dish-labour-intensity">
+                    <option>Low</option>
+                    <option selected>Medium</option>
+                    <option>High</option>
+                  </select>
+                  <small>Prep and service effort.</small>
+                </label>
+                <label>Perceived Value
+                  <select id="dish-perceived-value">
+                    <option>Low</option>
+                    <option selected>Medium</option>
+                    <option>High</option>
+                  </select>
+                  <small>What guests feel it is worth.</small>
+                </label>
+                <label>Menu Role
+                  <select id="dish-menu-role">
+                    <option>Core Main</option>
+                    <option>Side / Add-On</option>
+                    <option>Signature Item</option>
+                    <option>Combo Driver</option>
+                    <option>Traffic Builder</option>
+                    <option>High Margin Support</option>
+                  </select>
+                  <small>Role this dish plays on menu.</small>
+                </label>
+              </div>
+            </div>
+            <div class="intelligence-group">
+              <h4>Market Anchors (Optional)</h4>
+              <div class="grid three compact-grid">
+                <label>Market Low Price £<input id="dish-market-low" type="number" step="0.01" min="0" /><small>Typical lower bound in your market.</small></label>
+                <label>Market High Price £<input id="dish-market-high" type="number" step="0.01" min="0" /><small>Typical upper bound in your market.</small></label>
+                <label>Minimum Acceptable Price £<input id="dish-min-price" type="number" step="0.01" min="0" /><small>Hard floor you will not go below.</small></label>
+              </div>
+            </div>
           </div>
 
           <h3>Dish Components</h3>
