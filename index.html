@@ -56,7 +56,22 @@
             <label>Notes<input id="ing-notes" /></label>
           </div>
           <div class="row"><button id="ing-save" class="btn primary">Save Ingredient</button><button id="ing-reset" class="btn">Reset</button></div>
-          <div class="table-wrap"><table><thead><tr><th>Name</th><th>Price</th><th>Pack</th><th>Supplier</th><th>Actions</th></tr></thead><tbody id="ing-body"></tbody></table></div>
+          <div class="ingredients-toolbar">
+            <div class="ingredients-toolbar__filters">
+              <label>Search ingredients<input id="ing-search" placeholder="Search name, supplier, notes..." /></label>
+              <label>Supplier filter
+                <select id="ing-filter-supplier"></select>
+              </label>
+            </div>
+            <div class="ingredients-toolbar__meta">
+              <span class="pill">Ingredients: <strong id="ing-count">0</strong></span>
+              <span class="pill">Suppliers: <strong id="ing-supplier-count">0</strong></span>
+              <button id="ing-expand-all" class="btn">Expand all</button>
+              <button id="ing-collapse-all" class="btn">Collapse all</button>
+              <button id="ing-add-cta" class="btn primary">Add Ingredient</button>
+            </div>
+          </div>
+          <div id="ing-groups" class="ingredient-groups"></div>
         </section>
       </section>
 
