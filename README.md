@@ -2,15 +2,16 @@
 
 Menu Price Engine is a **static-file-only** internal app for Kiju covering costing, menu engineering, snapshots, reporting, and weekly operator decision workflows.
 
-## UX refinement focus (current pass)
+## UX refinement focus (current second pass)
 
-This refinement pass prioritizes a calmer, more focused interface while preserving all existing logic:
-- **Home is simplified** into three clear zones: key KPIs, attention items, and quick actions.
-- **Information hierarchy is tighter** so top-level health metrics are visible first.
-- **Navigation is clearer** with explicit action buttons for Recipes, Ingredient Library, and Weekly Review.
-- **Mode separation is cleaner** so each tab stays focused on its own task.
-- **Mobile spacing and layout are lighter** (stacked controls, fuller tap targets, less visual density).
-- **Mode routing is hardened** with a single `switchMode()` flow, delegated nav events, and explicit panel hide/show state.
+This second refinement pass focuses specifically on mode clarity and mobile usability while preserving existing calculations and workflow logic:
+- **Home-only first load** is enforced (`home-mode` shell state + explicit mode switch on init).
+- **Non-active major sections remain hidden/inert** until selected (active panel toggles `hidden`, `aria-hidden`, and `inert`).
+- **Mode highlight clarity improved** with stronger active-tab styling, `aria-current`, and clearer mode indicator text.
+- **Mode switching stays instant/reliable** through a single delegated `switchMode()` path and no-op guard for duplicate active-mode clicks.
+- **Mobile density reduced** with tighter shell/card spacing and cleaner small-screen rhythm.
+- **Tap targets improved** with larger nav button heights, stronger focus visibility, and more touch-friendly button sizing.
+- **Default home view de-cluttered** by hiding the secondary mode header while in Home mode.
 
 ## Weekly Review Mode (Operator Ritual)
 

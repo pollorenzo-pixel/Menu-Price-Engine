@@ -7,24 +7,24 @@
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
-    <div class="app-shell">
+    <div class="app-shell home-mode">
       <header class="app-header card">
         <div>
           <h1>Menu Price Engine</h1>
-          <p>Kiju internal costing, menu engineering, reporting + review workflow · Stage 4</p>
+          <p>Kiju internal costing, menu engineering, reporting, and weekly review workflow.</p>
         </div>
         <div class="header-actions">
-          <span id="mode-indicator" class="count-pill">Mode: Live</span>
+          <span id="mode-indicator" class="count-pill">Mode: Home / Command Center · Live</span>
         </div>
       </header>
 
       <nav id="mode-nav" class="mode-nav card" aria-label="App modes">
-        <button class="mode-tab active" data-mode="home" type="button">Home</button>
-        <button class="mode-tab" data-mode="recipes" type="button">Recipes &amp; Costing</button>
-        <button class="mode-tab" data-mode="analysis" type="button">Menu Analysis</button>
-        <button class="mode-tab" data-mode="reports" type="button">Reports &amp; Snapshots</button>
-        <button class="mode-tab" data-mode="weekly" type="button">Weekly Review</button>
-        <button class="mode-tab" data-mode="ingredients" type="button">Ingredient Library</button>
+        <button class="mode-tab active" data-mode="home" type="button" aria-pressed="true" aria-current="page">Home</button>
+        <button class="mode-tab" data-mode="recipes" type="button" aria-pressed="false">Recipes &amp; Costing</button>
+        <button class="mode-tab" data-mode="analysis" type="button" aria-pressed="false">Menu Analysis</button>
+        <button class="mode-tab" data-mode="reports" type="button" aria-pressed="false">Reports &amp; Snapshots</button>
+        <button class="mode-tab" data-mode="weekly" type="button" aria-pressed="false">Weekly Review</button>
+        <button class="mode-tab" data-mode="ingredients" type="button" aria-pressed="false">Ingredient Library</button>
       </nav>
 
       <section class="mode-header card">
