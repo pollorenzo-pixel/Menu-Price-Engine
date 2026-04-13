@@ -9,6 +9,7 @@ The app uses a strict three-level structure:
 1. **Ingredients** = what you buy
    - Raw purchased supplier items only.
    - Contains purchase price, pack size/unit, supplier, and notes.
+   - Ingredient Library view is grouped by supplier (accordion sections) with a dedicated **No Supplier** group for unassigned items, plus search/filter controls.
 
 2. **Recipes** = what you prep
    - Prepared components (sauces, dressings, cooked proteins, toppings, etc.).

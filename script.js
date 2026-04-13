@@ -31,6 +31,11 @@ const state = {
   editRecipeId: null,
   editDishId: null,
   mode: 'home',
+  ingredientUi: {
+    search: '',
+    supplierFilter: 'all',
+    collapsedSuppliers: new Set(),
+  },
 };
 
 function safeParse(k, fallback) {
@@ -296,8 +301,91 @@ function modeSwitch(mode) {
   $('mode-indicator').textContent = `Mode: ${activeLabel}`;
 }
 
+function supplierKey(supplierName) {
+  return t(supplierName).toLocaleLowerCase() || '__unassigned__';
+}
+
+function supplierLabel(supplierName) {
+  return t(supplierName) || 'No Supplier';
+}
+
+function ingredientMatchesSearch(ingredient, searchTerm) {
+  if (!searchTerm) return true;
+  const haystack = [ingredient.name, ingredient.supplier, ingredient.notes, ingredient.packUnit].map((v) => t(v).toLocaleLowerCase()).join(' ');
+  return haystack.includes(searchTerm);
+}
+
+function filteredIngredients() {
+  const searchTerm = t(state.ingredientUi.search).toLocaleLowerCase();
+  return state.ingredients.filter((ingredient) => {
+    const key = supplierKey(ingredient.supplier);
+    const supplierMatches = state.ingredientUi.supplierFilter === 'all' || state.ingredientUi.supplierFilter === key;
+    return supplierMatches && ingredientMatchesSearch(ingredient, searchTerm);
+  });
+}
+
+function groupedIngredients(items) {
+  const map = new Map();
+  items.forEach((ingredient) => {
+    const key = supplierKey(ingredient.supplier);
+    if (!map.has(key)) map.set(key, { key, label: supplierLabel(ingredient.supplier), items: [] });
+    map.get(key).items.push(ingredient);
+  });
+  const groups = [...map.values()].map((group) => ({
+    ...group,
+    items: group.items.sort((a, b) => a.name.localeCompare(b.name)),
+  }));
+  groups.sort((a, b) => {
+    if (a.key === '__unassigned__') return 1;
+    if (b.key === '__unassigned__') return -1;
+    return a.label.localeCompare(b.label);
+  });
+  return groups;
+}
+
+function renderIngredientSupplierFilter() {
+  const select = $('ing-filter-supplier');
+  if (!select) return;
+  const groups = groupedIngredients(state.ingredients);
+  select.innerHTML = `<option value="all">All suppliers</option>${groups.map((group) => `<option value="${group.key}">${group.label} (${group.items.length})</option>`).join('')}`;
+  if (![...select.options].some((opt) => opt.value === state.ingredientUi.supplierFilter)) state.ingredientUi.supplierFilter = 'all';
+  select.value = state.ingredientUi.supplierFilter;
+}
+
 function renderIngredients() {
-  $('ing-body').innerHTML = state.ingredients.map((i) => `<tr><td>${i.name}</td><td>${money(i.purchasePrice)}</td><td>${i.packSize} ${i.packUnit}</td><td>${i.supplier || '—'}</td><td><button class="btn" data-ing-edit="${i.id}">Edit</button> <button class="btn danger" data-ing-del="${i.id}">Delete</button></td></tr>`).join('');
+  const items = filteredIngredients();
+  const groups = groupedIngredients(items);
+  $('ing-count').textContent = String(items.length);
+  $('ing-supplier-count').textContent = String(groups.length);
+  renderIngredientSupplierFilter();
+
+  if (!groups.length) {
+    $('ing-groups').innerHTML = '<p class="muted ingredient-empty">No ingredients match your current search/filter.</p>';
+    return;
+  }
+
+  $('ing-groups').innerHTML = groups.map((group) => {
+    const collapsed = state.ingredientUi.collapsedSuppliers.has(group.key);
+    return `<section class="supplier-group">
+      <button class="supplier-group__header" data-supplier-toggle="${group.key}" aria-expanded="${(!collapsed).toString()}">
+        <span class="supplier-group__title">${group.label}</span>
+        <span class="supplier-group__meta">${group.items.length} ingredient${group.items.length === 1 ? '' : 's'}</span>
+      </button>
+      <div class="supplier-group__content" ${collapsed ? 'hidden' : ''}>
+        ${group.items.map((i) => `<article class="ingredient-card">
+          <div class="ingredient-card__main">
+            <strong>${i.name}</strong>
+            <span class="muted">${i.packSize} ${i.packUnit} · ${money(i.purchasePrice)}</span>
+            <span class="muted">${supplierLabel(i.supplier)}</span>
+          </div>
+          <div class="ingredient-card__actions">
+            <button class="btn" data-ing-edit="${i.id}">Edit</button>
+            <button class="btn danger" data-ing-del="${i.id}">Delete</button>
+          </div>
+        </article>`).join('')}
+      </div>
+    </section>`;
+  }).join('');
 }
 
 function fillRecipeRowOptions(row) {
@@ -608,20 +696,49 @@ function bindEvents() {
     ['ing-name', 'ing-price', 'ing-pack-size', 'ing-supplier', 'ing-notes'].forEach((id) => $(id).value = '');
     $('ing-pack-unit').value = 'g';
   });
-  $('ing-body').addEventListener('click', (e) => {
+  $('ing-groups').addEventListener('click', (e) => {
+    const toggle = e.target.closest('[data-supplier-toggle]');
     const edit = e.target.closest('[data-ing-edit]');
     const del = e.target.closest('[data-ing-del]');
+    if (toggle) {
+      const key = toggle.dataset.supplierToggle;
+      if (state.ingredientUi.collapsedSuppliers.has(key)) state.ingredientUi.collapsedSuppliers.delete(key);
+      else state.ingredientUi.collapsedSuppliers.add(key);
+      renderIngredients();
+      return;
+    }
     if (edit) {
       const i = state.ingredients.find((x) => x.id === edit.dataset.ingEdit);
       if (!i) return;
       state.editIngredientId = i.id;
       $('ing-name').value = i.name; $('ing-price').value = i.purchasePrice; $('ing-pack-size').value = i.packSize;
       $('ing-pack-unit').value = i.packUnit; $('ing-supplier').value = i.supplier; $('ing-notes').value = i.notes;
+      $('ing-name').focus();
     }
     if (del) {
       state.ingredients = state.ingredients.filter((x) => x.id !== del.dataset.ingDel);
       persist(); renderAll();
     }
+  });
+  $('ing-search').addEventListener('input', (e) => {
+    state.ingredientUi.search = e.target.value;
+    renderIngredients();
+  });
+  $('ing-filter-supplier').addEventListener('change', (e) => {
+    state.ingredientUi.supplierFilter = e.target.value;
+    renderIngredients();
+  });
+  $('ing-expand-all').addEventListener('click', () => {
+    state.ingredientUi.collapsedSuppliers.clear();
+    renderIngredients();
+  });
+  $('ing-collapse-all').addEventListener('click', () => {
+    groupedIngredients(filteredIngredients()).forEach((group) => state.ingredientUi.collapsedSuppliers.add(group.key));
+    renderIngredients();
+  });
+  $('ing-add-cta').addEventListener('click', () => {
+    $('ing-reset').click();
+    $('ing-name').focus();
   });
 
   $('rec-add-row').addEventListener('click', () => addRecipeRow());
