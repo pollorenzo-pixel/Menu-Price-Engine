@@ -12,7 +12,7 @@ This tool is built for internal hospitality operations teams:
 
 It is not designed as a consumer product.
 
-## Stage 2 Features
+## Stage 2 Features (Refined Pass)
 
 ### 1) Ingredient Library
 - Add, edit, delete ingredients
@@ -26,6 +26,7 @@ It is not designed as a consumer product.
 - Search saved recipes
 - Sort and display by most recently updated
 - Restore full recipe editor state and ingredient rows
+- Recipe cards show category, rounded recommended price, and food cost %
 
 ### 3) Snapshot-Safe Ingredient Rows
 - Recipe rows can link to library ingredients, then override values
@@ -54,8 +55,16 @@ It is not designed as a consumer product.
 - Auto-save draft while editing
 - Restore draft and saved datasets on reload
 - Safe JSON parsing fallbacks to prevent crashes on corrupted storage values
+- Draft restore timestamp shown in UI for operator confidence
 
-### 7) Sample Data Seeding
+### 7) UX and Validation Polish
+- Cleaner scan-friendly saved recipe list cards
+- Ingredient library now shows recipe usage count for safe delete decisions
+- Clear but non-intrusive validation (inline message + light field highlights)
+- Consistent GBP formatting across cards, tables, and results
+- Improved mobile spacing and visual hierarchy without any build tooling
+
+### 8) Sample Data Seeding
 If storage is empty, Stage 2 seeds realistic starter data:
 - Ingredient set including baguette, chicken thigh, sauces, greens, takeaway packaging, etc.
 - Two sample recipes:
@@ -104,6 +113,13 @@ No build pipeline is required (pure static files).
 
 Sample data is only auto-seeded when all storage is empty and no seed flag exists.  
 After first seed, user data is preserved across reloads.
+
+## Stability/Compatibility Notes
+
+- Pure static files only (`index.html`, `style.css`, `script.js`) for easy GitHub Pages hosting.
+- No framework, no bundler, no server dependency.
+- Saved recipes preserve ingredient snapshots to avoid breakage after library edits/deletes.
+- Unit conversion is guarded by unit families (`weight`, `volume`, `count`) and returns warnings instead of crashing.
 
 ## Current Stage 2 Limitations
 

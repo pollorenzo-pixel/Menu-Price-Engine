@@ -23,12 +23,18 @@ const toNumber = (v, fallback = 0) => {
 };
 const cleanText = (v) => String(v ?? '').trim();
 const safeLower = (v) => cleanText(v).toLowerCase();
+const escapeHtml = (v) => String(v ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
 
 /* ==============================
    Format Helpers
 ================================ */
 const fmtCurrency = (value) => new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP' }).format(Number.isFinite(value) ? value : 0);
 const fmtPercent = (value) => `${(Number.isFinite(value) ? value : 0).toFixed(2)}%`;
+
+function setInlineMessage(el, message, type = 'warn') {
+  el.textContent = message || '';
+  el.classList.toggle('success', type === 'success');
+}
 
 /* ==============================
    Unit Conversion
@@ -210,6 +216,19 @@ function validateRecipe(recipe) {
   return errors;
 }
 
+function clearRecipeValidationState() {
+  [dom.fields.name, dom.fields.portions, dom.fields.target, dom.fields.vat, dom.fields.delivery].forEach((el) => el.classList.remove('is-invalid'));
+}
+
+function markRecipeValidation(recipe) {
+  clearRecipeValidationState();
+  if (!cleanText(recipe.name)) dom.fields.name.classList.add('is-invalid');
+  if (!(recipe.portionsYielded > 0)) dom.fields.portions.classList.add('is-invalid');
+  if (!(recipe.targetFoodCostPercent > 0 && recipe.targetFoodCostPercent < 100)) dom.fields.target.classList.add('is-invalid');
+  if (recipe.vatRatePercent < 0) dom.fields.vat.classList.add('is-invalid');
+  if (recipe.deliveryCommissionPercent < 0) dom.fields.delivery.classList.add('is-invalid');
+}
+
 function validateIngredientInput(input, editingId = null) {
   const errors = [];
   if (!input.name) errors.push('Ingredient name is required.');
@@ -359,14 +378,13 @@ function roundByRule(value, step) {
 function calculateRecipe(recipe) {
   const warnings = [];
   let totalIngredientCost = 0;
+  const rowCosts = [];
 
-  recipe.ingredientRows.forEach((row, index) => {
+  recipe.ingredientRows.forEach((row) => {
     const res = calcRowCost(row);
     row.calculatedCostUsed = res.cost;
+    rowCosts.push(res.cost);
     totalIngredientCost += res.cost;
-
-    const costCell = dom.ingredientRows.querySelectorAll('tr')[index]?.querySelector('.row-cost');
-    if (costCell) costCell.textContent = fmtCurrency(res.cost);
     if (res.warning) warnings.push(res.warning);
   });
 
@@ -395,6 +413,7 @@ function calculateRecipe(recipe) {
 
   return {
     warnings,
+    rowCosts,
     totalIngredientCost,
     ingredientCostPerPortion,
     portionCostExclLabour,
@@ -433,10 +452,23 @@ function renderRecipes() {
     .filter((r) => safeLower(r.name).includes(q));
 
   dom.recipeList.innerHTML = '';
+  if (!recipes.length) {
+    const li = document.createElement('li');
+    li.className = 'recipe-item';
+    li.innerHTML = '<h4>No recipes found</h4><p>Try another search or create a new recipe.</p>';
+    dom.recipeList.appendChild(li);
+  }
   recipes.forEach((recipe) => {
+    const calc = calculateRecipe(structuredClone(recipe));
     const li = document.createElement('li');
     li.className = `recipe-item ${recipe.id === state.activeRecipeId ? 'active' : ''}`;
-    li.innerHTML = `<h4>${recipe.name}</h4><p>${recipe.category || 'Uncategorized'} · updated ${new Date(recipe.updatedAt).toLocaleString()}</p>`;
+    li.innerHTML = `
+      <h4>${escapeHtml(recipe.name)}</h4>
+      <div class="recipe-meta-row">
+        <span>${escapeHtml(recipe.category || 'Uncategorized')}</span>
+        <span class="mini-pill">${fmtCurrency(calc.roundedSellingPrice)}</span>
+      </div>
+      <p>Food cost ${fmtPercent(calc.actualFoodCostRounded)} · updated ${new Date(recipe.updatedAt).toLocaleString()}</p>`;
     li.addEventListener('click', () => {
       state.activeRecipeId = recipe.id;
       setRecipeToForm(structuredClone(recipe));
@@ -452,14 +484,21 @@ function renderLibrary() {
   const q = safeLower(state.ingredientSearch);
   const ingredients = state.ingredients.filter((ing) => safeLower(ing.name).includes(q));
   dom.library.body.innerHTML = '';
+  if (!ingredients.length) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = '<td colspan="7">No ingredients match this search.</td>';
+    dom.library.body.appendChild(tr);
+  }
   ingredients.forEach((ing) => {
+    const useCount = state.recipes.filter((recipe) => recipe.ingredientRows.some((row) => row.ingredientId === ing.id)).length;
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td>${ing.name}</td>
+      <td>${escapeHtml(ing.name)}</td>
       <td>${fmtCurrency(ing.purchasePrice)}</td>
       <td>${ing.packSize} ${ing.packUnit}</td>
-      <td>${ing.supplier || '—'}</td>
-      <td>${ing.notes || '—'}</td>
+      <td>${escapeHtml(ing.supplier || '—')}</td>
+      <td>${escapeHtml(ing.notes || '—')}</td>
+      <td>${useCount}</td>
       <td>
         <button class="btn btn-secondary lib-edit" data-id="${ing.id}" type="button">Edit</button>
         <button class="btn btn-danger lib-delete" data-id="${ing.id}" type="button">Delete</button>
@@ -503,6 +542,10 @@ function renderResults(calc, recipe) {
 function recalcAndRender() {
   const recipe = readRecipeFromForm();
   const calc = calculateRecipe(recipe);
+  dom.ingredientRows.querySelectorAll('tr').forEach((tr, index) => {
+    const costCell = tr.querySelector('.row-cost');
+    if (costCell) costCell.textContent = fmtCurrency(calc.rowCosts[index] ?? 0);
+  });
   renderResults(calc, recipe);
 }
 
@@ -528,14 +571,14 @@ function clearIngredientForm() {
   dom.library.packUnit.value = '';
   dom.library.supplier.value = '';
   dom.library.notes.value = '';
-  dom.library.errors.textContent = '';
+  setInlineMessage(dom.library.errors, '');
 }
 
 function addIngredient() {
   const input = readIngredientForm();
   const errors = validateIngredientInput(input);
   if (errors.length) {
-    dom.library.errors.textContent = errors.join(' ');
+    setInlineMessage(dom.library.errors, errors.join(' '));
     return;
   }
   state.ingredients.push({ id: uid('ing'), ...input });
@@ -543,6 +586,7 @@ function addIngredient() {
   clearIngredientForm();
   refreshIngredientSelects();
   renderLibrary();
+  setInlineMessage(dom.library.errors, 'Ingredient added.', 'success');
 }
 
 function editIngredient(id) {
@@ -559,13 +603,13 @@ function editIngredient(id) {
 
 function updateIngredient() {
   if (!state.ingredientEditingId) {
-    dom.library.errors.textContent = 'Select an ingredient to edit first.';
+    setInlineMessage(dom.library.errors, 'Select an ingredient to edit first.');
     return;
   }
   const input = readIngredientForm();
   const errors = validateIngredientInput(input, state.ingredientEditingId);
   if (errors.length) {
-    dom.library.errors.textContent = errors.join(' ');
+    setInlineMessage(dom.library.errors, errors.join(' '));
     return;
   }
   state.ingredients = state.ingredients.map((ing) => (ing.id === state.ingredientEditingId ? { ...ing, ...input } : ing));
@@ -573,6 +617,7 @@ function updateIngredient() {
   clearIngredientForm();
   refreshIngredientSelects();
   renderLibrary();
+  setInlineMessage(dom.library.errors, 'Ingredient updated.', 'success');
 }
 
 function deleteIngredient(id) {
@@ -587,6 +632,7 @@ function deleteIngredient(id) {
   persistIngredients();
   refreshIngredientSelects();
   renderLibrary();
+  setInlineMessage(dom.library.errors, 'Ingredient deleted.', 'success');
 }
 
 function refreshIngredientSelects() {
@@ -609,6 +655,7 @@ function persistRecipes() {
 function saveDraft() {
   const draft = readRecipeFromForm();
   draft.id = state.activeRecipeId;
+  draft.savedAt = nowIso();
   setStored(STORAGE_KEYS.draft, draft);
   dom.draftState.textContent = `Draft saved ${new Date().toLocaleTimeString()}`;
 }
@@ -620,7 +667,8 @@ function clearDraft() {
 
 function newRecipe() {
   state.activeRecipeId = null;
-  dom.editorErrors.textContent = '';
+  setInlineMessage(dom.editorErrors, '');
+  clearRecipeValidationState();
   setRecipeToForm(defaultRecipe());
   saveDraft();
   renderRecipes();
@@ -630,7 +678,8 @@ function saveRecipe() {
   const recipe = readRecipeFromForm();
   const errors = validateRecipe(recipe);
   if (errors.length) {
-    dom.editorErrors.textContent = errors.join(' ');
+    markRecipeValidation(recipe);
+    setInlineMessage(dom.editorErrors, errors.join(' '));
     return;
   }
   const stamp = nowIso();
@@ -642,24 +691,26 @@ function saveRecipe() {
   persistRecipes();
   saveDraft();
   renderRecipes();
-  dom.editorErrors.textContent = 'Recipe saved.';
+  clearRecipeValidationState();
+  setInlineMessage(dom.editorErrors, 'Recipe saved.', 'success');
 }
 
 function updateRecipe() {
   if (!state.activeRecipeId) {
-    dom.editorErrors.textContent = 'Load a saved recipe first, or use Save Recipe.';
+    setInlineMessage(dom.editorErrors, 'Load a saved recipe first, or use Save Recipe.');
     return;
   }
   const recipe = readRecipeFromForm();
   const errors = validateRecipe(recipe);
   if (errors.length) {
-    dom.editorErrors.textContent = errors.join(' ');
+    markRecipeValidation(recipe);
+    setInlineMessage(dom.editorErrors, errors.join(' '));
     return;
   }
 
   const existing = state.recipes.find((r) => r.id === state.activeRecipeId);
   if (!existing) {
-    dom.editorErrors.textContent = 'Selected recipe was not found.';
+    setInlineMessage(dom.editorErrors, 'Selected recipe was not found.');
     return;
   }
 
@@ -671,13 +722,14 @@ function updateRecipe() {
   persistRecipes();
   saveDraft();
   renderRecipes();
-  dom.editorErrors.textContent = 'Recipe updated.';
+  clearRecipeValidationState();
+  setInlineMessage(dom.editorErrors, 'Recipe updated.', 'success');
 }
 
 function duplicateRecipe() {
   const source = state.activeRecipeId ? state.recipes.find((r) => r.id === state.activeRecipeId) : readRecipeFromForm();
   if (!source || !cleanText(source.name)) {
-    dom.editorErrors.textContent = 'Provide a recipe name before duplicating.';
+    setInlineMessage(dom.editorErrors, 'Provide a recipe name before duplicating.');
     return;
   }
   const copy = structuredClone(source);
@@ -693,12 +745,12 @@ function duplicateRecipe() {
   persistRecipes();
   saveDraft();
   renderRecipes();
-  dom.editorErrors.textContent = 'Recipe duplicated.';
+  setInlineMessage(dom.editorErrors, 'Recipe duplicated.', 'success');
 }
 
 function deleteRecipe() {
   if (!state.activeRecipeId) {
-    dom.editorErrors.textContent = 'Select a recipe to delete.';
+    setInlineMessage(dom.editorErrors, 'Select a recipe to delete.');
     return;
   }
   const recipe = state.recipes.find((r) => r.id === state.activeRecipeId);
@@ -735,6 +787,8 @@ function bindEvents() {
 
   Object.values(dom.fields).forEach((el) => {
     el.addEventListener('input', () => {
+      if (el.classList.contains('is-invalid')) el.classList.remove('is-invalid');
+      if (dom.editorErrors.textContent && !dom.editorErrors.classList.contains('success')) setInlineMessage(dom.editorErrors, '');
       recalcAndRender();
       saveDraft();
     });
@@ -756,7 +810,7 @@ function bindEvents() {
       state.activeRecipeId = null;
       clearDraft();
       setRecipeToForm(defaultRecipe());
-      dom.editorErrors.textContent = '';
+      setInlineMessage(dom.editorErrors, '');
       renderRecipes();
     }
   });
@@ -770,6 +824,12 @@ function bindEvents() {
   dom.library.search.addEventListener('input', () => {
     state.ingredientSearch = dom.library.search.value;
     renderLibrary();
+  });
+
+  [dom.library.name, dom.library.price, dom.library.packSize, dom.library.packUnit].forEach((el) => {
+    el.addEventListener('input', () => {
+      if (!dom.library.errors.classList.contains('success')) setInlineMessage(dom.library.errors, '');
+    });
   });
 
   dom.library.add.addEventListener('click', addIngredient);
@@ -802,6 +862,7 @@ function initState() {
   if (state.draft) {
     state.activeRecipeId = state.draft.id || null;
     setRecipeToForm({ ...defaultRecipe(), ...state.draft });
+    dom.draftState.textContent = `Draft restored ${new Date(state.draft.savedAt || Date.now()).toLocaleString()}`;
   } else if (state.recipes.length) {
     const latest = [...state.recipes].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())[0];
     state.activeRecipeId = latest.id;
