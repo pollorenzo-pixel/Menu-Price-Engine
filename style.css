@@ -53,6 +53,7 @@ h1, h2, h3, p { margin: 0; }
   font-weight: 600;
 }
 .mode-tab.active { background: #1d4d85; border-color: #5f9bda; }
+[hidden] { display: none !important; }
 .mode-header { padding: 0.85rem 1rem; margin-bottom: 0.8rem; }
 .mode-header p { margin-top: 0.25rem; color: var(--muted); }
 .mode-panel { display: none; }
@@ -186,7 +187,7 @@ th { background: #0d1627; color: var(--muted); font-size: 0.78rem; }
 @media (max-width: 920px) {
   .app-shell { padding: 0.8rem; }
   .app-header { flex-direction: column; align-items: stretch; padding: 0.85rem; }
-  .mode-nav { grid-template-columns: 1fr 1fr; }
+  .mode-nav { grid-template-columns: 1fr 1fr; position: relative; z-index: 5; }
   .mode-tab { padding: 0.7rem 0.55rem; }
   .home-grid,
   .field-grid.two-col,

@@ -36,6 +36,8 @@ const WEEKLY_STEPS = [
 ];
 
 const dom = {
+  appShell: document.querySelector('.app-shell'),
+  modeNav: $('mode-nav'),
   recipeList: $('recipe-list'), recipeCount: $('recipe-count'), recipeSearch: $('recipe-search'), recipeStatusFilter: $('recipe-status-filter'),
   ingredientRows: $('ingredient-rows'), template: $('ingredient-row-template'),
   editorErrors: $('editor-errors'), calcWarnings: $('calc-warnings'), draftState: $('draft-state'),
@@ -98,9 +100,26 @@ function switchMode(mode) {
   if (!MODE_META[mode]) return;
   state.currentMode = mode;
   dom.modeTabs.forEach((tab) => tab.classList.toggle('active', tab.dataset.mode === mode));
-  dom.modePanels.forEach((panel) => panel.classList.toggle('active', panel.dataset.modePanel === mode));
+  dom.modePanels.forEach((panel) => {
+    const isActive = panel.dataset.modePanel === mode;
+    panel.classList.toggle('active', isActive);
+    panel.hidden = !isActive;
+  });
   dom.activeModeTitle.textContent = MODE_META[mode].title;
   dom.activeModeDescription.textContent = MODE_META[mode].description;
+}
+
+function bindModeEvents() {
+  dom.modeNav.addEventListener('click', (e) => {
+    const tab = e.target.closest('[data-mode]');
+    if (!tab) return;
+    switchMode(tab.dataset.mode);
+  });
+  dom.appShell.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-open-mode]');
+    if (!btn) return;
+    switchMode(btn.dataset.openMode);
+  });
 }
 
 function setInlineMessage(el, message, type = 'warn') { el.textContent = message || ''; el.classList.toggle('success', type === 'success'); }
@@ -819,8 +838,9 @@ function renderWeeklyReview() {
 }
 
 function bindEvents() {
+  bindModeEvents();
   dom.actions.addRow.addEventListener('click', () => { addRowToDom(defaultIngredientRow()); recalcAndRender(); });
-  dom.actions.save.addEventListener('click', () => upsertRecipe('save')); dom.actions.update.addEventListener('click', () => upsertRecipe('update')); dom.actions.duplicate.addEventListener('click', duplicateRecipe); dom.actions.del.addEventListener('click', deleteRecipe); dom.actions.reset.addEventListener('click', resetRecipeForm); dom.actions.newRecipe.addEventListener('click', () => { switchMode('recipes'); resetRecipeForm(); });
+  dom.actions.save.addEventListener('click', () => upsertRecipe('save')); dom.actions.update.addEventListener('click', () => upsertRecipe('update')); dom.actions.duplicate.addEventListener('click', duplicateRecipe); dom.actions.del.addEventListener('click', deleteRecipe); dom.actions.reset.addEventListener('click', resetRecipeForm); dom.actions.newRecipe.addEventListener('click', resetRecipeForm);
   dom.recipeSearch.addEventListener('input', (e) => { state.recipeSearch = e.target.value; renderRecipeList(); });
   dom.recipeStatusFilter.addEventListener('change', (e) => { state.recipeStatusFilter = e.target.value; renderRecipeList(); });
   Object.values(dom.fields).forEach((el) => { el.addEventListener('input', recalcAndRender); el.addEventListener('change', recalcAndRender); });
@@ -829,8 +849,6 @@ function bindEvents() {
   dom.compareSearch.addEventListener('input', (e) => { state.compareSearch = e.target.value; renderComparisonTable(); }); dom.compareMovementFilter.addEventListener('change', (e) => { state.compareMovementFilter = e.target.value; renderComparisonTable(); });
   dom.comparisonTable.querySelectorAll('th[data-csort]').forEach((th) => th.addEventListener('click', () => { const k = th.dataset.csort; if (state.csort.key === k) state.csort.dir = state.csort.dir === 'asc' ? 'desc' : 'asc'; else state.csort = { key: k, dir: 'desc' }; renderComparisonTable(); }));
 
-  dom.actions.openLib.addEventListener('click', () => switchMode('ingredients'));
-  dom.actions.closeLib.addEventListener('click', () => switchMode('home'));
   dom.library.search.addEventListener('input', (e) => { state.ingredientSearch = e.target.value; renderIngredientLibrary(); });
   dom.library.add.addEventListener('click', () => {
     const i = readIngredientForm(); if (!i.name || i.packSize <= 0 || i.purchasePrice < 0 || !PACK_UNITS.includes(i.packUnit)) return setInlineMessage(dom.library.errors, 'Valid ingredient fields are required.');
@@ -853,7 +871,6 @@ function bindEvents() {
   dom.actions.printSummary.addEventListener('click', () => window.print());
   dom.actions.copySummary.addEventListener('click', async () => { try { await navigator.clipboard.writeText(reviewSummaryText()); setInlineMessage(dom.snapshotFeedback, 'Summary copied to clipboard.', 'success'); } catch { setInlineMessage(dom.snapshotFeedback, 'Clipboard not available in this browser context.'); } });
 
-  dom.weekly.navBtn.addEventListener('click', () => switchMode('weekly'));
   dom.weekly.stepIndicator.addEventListener('click', (e) => {
     const btn = e.target.closest('[data-weekly-nav]'); if (!btn) return;
     const step = toNumber(btn.dataset.weeklyNav, 1);
@@ -951,4 +968,8 @@ function init() {
   renderRecipeList(); renderDashboard(); recalcAndRender(); renderWeeklyReview();
   switchMode('home');
 }
-init();
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', init, { once: true });
+} else {
+  init();
+}

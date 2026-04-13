@@ -10,6 +10,7 @@ This refinement pass prioritizes a calmer, more focused interface while preservi
 - **Navigation is clearer** with explicit action buttons for Recipes, Ingredient Library, and Weekly Review.
 - **Mode separation is cleaner** so each tab stays focused on its own task.
 - **Mobile spacing and layout are lighter** (stacked controls, fuller tap targets, less visual density).
+- **Mode routing is hardened** with a single `switchMode()` flow, delegated nav events, and explicit panel hide/show state.
 
 ## Weekly Review Mode (Operator Ritual)
 
