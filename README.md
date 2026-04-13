@@ -2,6 +2,15 @@
 
 Menu Price Engine is a **static-file-only** internal app for Kiju covering costing, menu engineering, snapshots, reporting, and weekly operator decision workflows.
 
+## UX refinement focus (current pass)
+
+This refinement pass prioritizes a calmer, more focused interface while preserving all existing logic:
+- **Home is simplified** into three clear zones: key KPIs, attention items, and quick actions.
+- **Information hierarchy is tighter** so top-level health metrics are visible first.
+- **Navigation is clearer** with explicit action buttons for Recipes, Ingredient Library, and Weekly Review.
+- **Mode separation is cleaner** so each tab stays focused on its own task.
+- **Mobile spacing and layout are lighter** (stacked controls, fuller tap targets, less visual density).
+
 ## Weekly Review Mode (Operator Ritual)
 
 Weekly Review Mode is designed as a guided founder/operator workflow, not a generic form.
@@ -54,16 +63,7 @@ Each saved review includes:
 The follow-up step loads the **most recent saved review** and lets the operator score each prior decision outcome.
 Those outcomes are attached to the current weekly review record when saved.
 
-## Mobile and responsiveness notes
-
-Weekly Review Mode is refined for phone use:
-- step navigation stays usable in stacked layout
-- cards stack vertically on narrow widths
-- primary action buttons become full-width tap targets
-- metrics and summaries wrap without overflow
-- tables elsewhere in app still use horizontal scrolling where needed
-
-## Stage 4 compatibility retained
+## Stage 4 capability retained
 
 All core Stage 4 capabilities remain intact:
 - ingredient library CRUD

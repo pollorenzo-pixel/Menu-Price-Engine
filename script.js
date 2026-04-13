@@ -820,7 +820,7 @@ function renderWeeklyReview() {
 
 function bindEvents() {
   dom.actions.addRow.addEventListener('click', () => { addRowToDom(defaultIngredientRow()); recalcAndRender(); });
-  dom.actions.save.addEventListener('click', () => upsertRecipe('save')); dom.actions.update.addEventListener('click', () => upsertRecipe('update')); dom.actions.duplicate.addEventListener('click', duplicateRecipe); dom.actions.del.addEventListener('click', deleteRecipe); dom.actions.reset.addEventListener('click', resetRecipeForm); dom.actions.newRecipe.addEventListener('click', resetRecipeForm);
+  dom.actions.save.addEventListener('click', () => upsertRecipe('save')); dom.actions.update.addEventListener('click', () => upsertRecipe('update')); dom.actions.duplicate.addEventListener('click', duplicateRecipe); dom.actions.del.addEventListener('click', deleteRecipe); dom.actions.reset.addEventListener('click', resetRecipeForm); dom.actions.newRecipe.addEventListener('click', () => { switchMode('recipes'); resetRecipeForm(); });
   dom.recipeSearch.addEventListener('input', (e) => { state.recipeSearch = e.target.value; renderRecipeList(); });
   dom.recipeStatusFilter.addEventListener('change', (e) => { state.recipeStatusFilter = e.target.value; renderRecipeList(); });
   Object.values(dom.fields).forEach((el) => { el.addEventListener('input', recalcAndRender); el.addEventListener('change', recalcAndRender); });
@@ -853,7 +853,7 @@ function bindEvents() {
   dom.actions.printSummary.addEventListener('click', () => window.print());
   dom.actions.copySummary.addEventListener('click', async () => { try { await navigator.clipboard.writeText(reviewSummaryText()); setInlineMessage(dom.snapshotFeedback, 'Summary copied to clipboard.', 'success'); } catch { setInlineMessage(dom.snapshotFeedback, 'Clipboard not available in this browser context.'); } });
 
-  dom.weekly.navBtn.addEventListener('click', () => dom.weekly.section.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  dom.weekly.navBtn.addEventListener('click', () => switchMode('weekly'));
   dom.weekly.stepIndicator.addEventListener('click', (e) => {
     const btn = e.target.closest('[data-weekly-nav]'); if (!btn) return;
     const step = toNumber(btn.dataset.weeklyNav, 1);
