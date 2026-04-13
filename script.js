@@ -18,6 +18,7 @@ const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
 const fmtCurrency = (v) => new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP' }).format(toNumber(v, 0));
 const fmtPercent = (v) => `${toNumber(v, 0).toFixed(2)}%`;
 const fmtInt = (v) => Math.round(toNumber(v, 0)).toLocaleString('en-GB');
+const shortDateTime = (iso) => new Date(iso).toLocaleString();
 
 const state = {
   ingredients: [], recipes: [], snapshots: [], draft: null,
@@ -36,6 +37,7 @@ const dom = {
   insightList: $('insight-list'), itemFlagList: $('item-flag-list'), periodLabel: $('period-label'), modeIndicator: $('mode-indicator'),
   analysisSearch: $('analysis-search'), analysisClassFilter: $('analysis-class-filter'), analysisTable: $('analysis-table'), analysisBody: $('analysis-body'),
   dashboardCards: $('dashboard-cards'), menuInsightList: $('menu-insight-list'), priorityList: $('priority-list'), snapshotList: $('snapshot-list'), comparisonSummary: $('comparison-summary'),
+  reviewSummaryOutput: $('review-summary-output'),
   matrixChart: $('matrix-chart'), matrixFallback: $('matrix-fallback'),
   compareSearch: $('compare-search'), compareMovementFilter: $('compare-movement-filter'), comparisonTable: $('comparison-table'), comparisonBody: $('comparison-body'),
   snapshotName: $('snapshot-name'), snapshotPeriod: $('snapshot-period'), snapshotNotes: $('snapshot-notes'), snapshotFeedback: $('snapshot-feedback'),
@@ -166,6 +168,18 @@ function recommendedAction(item) {
   if (item.classification === 'Dog') return 'Consider redesign or removal after test';
   return 'Maintain positioning and monitor';
 }
+function scorePriority(item, flag) {
+  let score = 0;
+  if (item.grossProfitPerPortion <= 0.15) score += 140;
+  if (item.classification === 'Dog') score += 85;
+  if (item.foodCostPercent > state.prefs.foodCostFlagTarget) score += 65;
+  if (item.effectiveMenuPrice < item.roundedSellingPrice) score += 40;
+  if (flag.includes('High sales')) score += 35;
+  if (flag.includes('Low sales')) score -= 10;
+  score += Math.max(0, item.unitsSold * 0.08);
+  score += Math.max(0, item.totalGrossProfit < 0 ? 45 : 0);
+  return Math.round(score);
+}
 
 function totalsFromItems(items) {
   const active = items.filter((i) => i.isActive);
@@ -182,27 +196,42 @@ function totalsFromItems(items) {
 function snapshotFromItems(name, periodLabel, notes, sourceLabel = 'live') {
   const metrics = state.recipes.map((r) => calculateRecipeMetrics(r, { suppressWarnings: true }));
   const classified = classifyMenuItems(metrics).items.map((i) => ({ ...i, flags: getItemFlags(i), action: recommendedAction(i) }));
-  return { id: uid('snap'), name, periodLabel: periodLabel || 'Unspecified', notes: notes || '', sourceLabel, createdAt: nowIso(), totals: totalsFromItems(classified), items: structuredClone(classified) };
+  return {
+    id: uid('snap'),
+    name,
+    periodLabel: periodLabel || 'Unspecified',
+    notes: notes || '',
+    sourceLabel,
+    createdAt: nowIso(),
+    storageVersion: STORAGE_VERSION,
+    totals: totalsFromItems(classified),
+    items: structuredClone(classified),
+  };
 }
 
 function comparePeriods(leftItems, rightItems) {
-  const lmap = new Map(leftItems.map((i) => [safeLower(i.name), i]));
-  const rmap = new Map(rightItems.map((i) => [safeLower(i.name), i]));
+  const itemKey = (i) => cleanText(i.id) || safeLower(i.name);
+  const lmap = new Map(leftItems.map((i) => [itemKey(i), i]));
+  const rmap = new Map(rightItems.map((i) => [itemKey(i), i]));
   const keys = [...new Set([...lmap.keys(), ...rmap.keys()])];
   const rows = keys.map((k) => {
     const oldI = lmap.get(k); const newI = rmap.get(k);
-    const base = oldI || { name: newI.name, classification: 'Missing', effectiveMenuPrice: 0, unitsSold: 0, revenue: 0, totalGrossProfit: 0, foodCostPercent: 0 };
-    const curr = newI || { name: oldI.name, classification: 'Missing', effectiveMenuPrice: 0, unitsSold: 0, revenue: 0, totalGrossProfit: 0, foodCostPercent: 0 };
+    const base = oldI || { id: '', name: newI.name, classification: 'Missing', effectiveMenuPrice: 0, unitsSold: 0, revenue: 0, totalGrossProfit: 0, foodCostPercent: 0, grossProfitPerPortion: 0, isActive: false };
+    const curr = newI || { id: '', name: oldI.name, classification: 'Missing', effectiveMenuPrice: 0, unitsSold: 0, revenue: 0, totalGrossProfit: 0, foodCostPercent: 0, grossProfitPerPortion: 0, isActive: false };
     const priceChange = curr.effectiveMenuPrice - base.effectiveMenuPrice;
     const unitsChange = curr.unitsSold - base.unitsSold;
     const revenueChange = curr.revenue - base.revenue;
     const profitChange = curr.totalGrossProfit - base.totalGrossProfit;
     const foodCostChange = curr.foodCostPercent - base.foodCostPercent;
-    const improved = revenueChange > 0 && profitChange > 0;
-    const worsened = revenueChange < 0 || profitChange < 0;
-    const movement = base.classification === curr.classification ? '→' : `${base.classification} → ${curr.classification}`;
-    const severity = curr.grossProfitPerPortion <= 0.15 || curr.classification === 'Dog' || profitChange < 0 ? 'High' : worsened ? 'Medium' : 'Low';
-    return { name: curr.name || base.name, oldClassification: base.classification, newClassification: curr.classification, priceChange, unitsChange, revenueChange, profitChange, foodCostChange, improved, worsened, movement, severity, action: recommendedAction(curr), old: base, new: curr };
+    const isNewItem = base.classification === 'Missing' && curr.classification !== 'Missing';
+    const isRemovedItem = curr.classification === 'Missing' && base.classification !== 'Missing';
+    const improved = !isNewItem && !isRemovedItem && revenueChange > 0 && profitChange > 0;
+    const worsened = !isNewItem && (revenueChange < 0 || profitChange < 0 || isRemovedItem);
+    const classChanged = base.classification !== curr.classification;
+    const movement = isNewItem ? 'New item added' : isRemovedItem ? 'Removed from latest period' : classChanged ? `${base.classification} → ${curr.classification}` : 'No class change';
+    const severity = isRemovedItem || curr.grossProfitPerPortion <= 0.15 || curr.classification === 'Dog' || profitChange < 0 ? 'High' : worsened || classChanged ? 'Medium' : 'Low';
+    const movementType = isNewItem ? 'new' : isRemovedItem ? 'removed' : improved ? 'improved' : worsened ? 'worsened' : classChanged ? 'changed' : 'stable';
+    return { id: curr.id || base.id || k, name: curr.name || base.name, oldClassification: base.classification, newClassification: curr.classification, priceChange, unitsChange, revenueChange, profitChange, foodCostChange, improved, worsened, classChanged, movement, movementType, severity, action: isRemovedItem ? 'Review removal impact and replacement plan' : recommendedAction(curr), old: base, new: curr };
   });
   const leftTotals = totalsFromItems(leftItems); const rightTotals = totalsFromItems(rightItems);
   const pct = (nv, ov) => ov === 0 ? null : ((nv - ov) / ov) * 100;
@@ -359,6 +388,8 @@ function renderDashboard() {
   const topRevenue = [...items].sort((a, b) => b.revenue - a.revenue)[0];
   const topProfit = [...items].sort((a, b) => b.totalGrossProfit - a.totalGrossProfit)[0];
   const weakestMargin = [...items].sort((a, b) => a.grossProfitPerPortion - b.grossProfitPerPortion)[0];
+  const strongestMomentum = state.comparison?.rows?.slice().sort((a, b) => b.profitChange - a.profitChange)[0];
+  const biggestDecline = state.comparison?.rows?.slice().sort((a, b) => a.profitChange - b.profitChange)[0];
   const highFoodCost = items.filter((i) => i.foodCostPercent > state.prefs.foodCostFlagTarget);
   const lowPrice = items.filter((i) => i.effectiveMenuPrice < i.roundedSellingPrice);
   const highlights = [
@@ -367,18 +398,24 @@ function renderDashboard() {
     `Weakest margin item: ${weakestMargin ? `${weakestMargin.name} (${fmtCurrency(weakestMargin.grossProfitPerPortion)}/portion)` : 'N/A'}`,
     `${highFoodCost.length} item(s) above target food cost (${state.prefs.foodCostFlagTarget}%)`,
     `${lowPrice.length} item(s) priced below recommendation`,
-    state.comparison ? `Classification changes in selected comparison: ${state.comparison.summary.changedClasses}` : 'Run a comparison to see period movement.',
+    state.comparison ? `Best momentum: ${strongestMomentum?.name || 'N/A'} (${fmtCurrency(strongestMomentum?.profitChange || 0)} GP change)` : 'Run a comparison to evaluate momentum.',
+    state.comparison ? `Largest decline: ${biggestDecline?.name || 'N/A'} (${fmtCurrency(biggestDecline?.profitChange || 0)} GP change)` : `Create at least 1 snapshot to start trend tracking.`,
+    state.comparison ? `Classification changes in selected comparison: ${state.comparison.summary.changedClasses}` : 'Run a comparison to see class movement.',
   ];
   dom.menuInsightList.innerHTML = highlights.map((h) => `<li>${h}</li>`).join('');
 
-  const priorities = [...items].flatMap((i) => i.flags.map((flag) => ({ name: i.name, flag, severity: i.grossProfitPerPortion <= 0.15 || i.classification === 'Dog' ? 'High' : flag.includes('Low sales') ? 'Low' : 'Medium', action: recommendedAction(i) })))
-    .sort((a, b) => ({ High: 3, Medium: 2, Low: 1 }[b.severity] - ({ High: 3, Medium: 2, Low: 1 }[a.severity]))).slice(0, 10);
-  dom.priorityList.innerHTML = priorities.length ? priorities.map((p) => `<li><strong>${p.name}</strong> — ${p.flag} <span class="movement-chip">${p.severity}</span><br/><span class="helper-text">${p.action}</span></li>`).join('') : '<li>No priority flags.</li>';
+  const priorities = [...items].flatMap((i) => i.flags.map((flag) => {
+    const score = scorePriority(i, flag);
+    const severity = score >= 140 ? 'High' : score >= 75 ? 'Medium' : 'Low';
+    return { name: i.name, flag, severity, score, action: recommendedAction(i) };
+  })).sort((a, b) => b.score - a.score).slice(0, 12);
+  dom.priorityList.innerHTML = priorities.length ? priorities.map((p) => `<li><strong>${p.name}</strong> — ${p.flag} <span class="movement-chip">${p.severity} · ${p.score}</span><br/><span class="helper-text">${p.action}</span></li>`).join('') : '<li class="empty-state">No priority flags right now.</li>';
 
   renderAnalysisTable(items);
   renderMatrix(items);
   renderSnapshotList();
   renderComparisonSummary();
+  dom.reviewSummaryOutput.textContent = reviewSummaryText();
 }
 
 function renderAnalysisTable(items) {
@@ -400,16 +437,26 @@ function renderMatrix(items) {
 }
 
 function renderSnapshotSelectors() {
-  const options = ['<option value="live">Current Live Data</option>', ...state.snapshots.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).map((s) => `<option value="${s.id}">${s.name} · ${s.periodLabel}</option>`)];
+  const ordered = state.snapshots.slice().sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  const options = ['<option value="live">Current Live Data</option>', ...ordered.map((s) => `<option value="${s.id}">${s.name} · ${s.periodLabel}</option>`)];
   dom.compareLeft.innerHTML = options.join(''); dom.compareRight.innerHTML = options.join('');
-  if (!dom.compareRight.value && state.snapshots[0]) dom.compareRight.value = state.snapshots[0].id;
+  if (!dom.compareRight.value && ordered[0]) dom.compareRight.value = ordered[0].id;
   if (!dom.compareLeft.value) dom.compareLeft.value = 'live';
 }
 function renderSnapshotList() {
-  dom.snapshotList.innerHTML = state.snapshots.length ? state.snapshots.slice().sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).map((s) => `<li><strong>${s.name}</strong> (${s.periodLabel})<br/><span class="helper-text">${new Date(s.createdAt).toLocaleString()} · ${s.notes || 'No notes'}</span><br/><button class="btn btn-secondary" data-snapshot-view="${s.id}" type="button">Load</button> <button class="btn btn-danger" data-snapshot-delete="${s.id}" type="button">Delete</button></li>`).join('') : '<li>No snapshots yet.</li>';
+  dom.snapshotList.innerHTML = state.snapshots.length
+    ? state.snapshots.slice().sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).map((s) => `<li><strong>${s.name}</strong> (${s.periodLabel})<br/><span class="helper-text">${shortDateTime(s.createdAt)} · ${s.notes || 'No notes'}</span><br/><button class="btn btn-secondary" data-snapshot-view="${s.id}" type="button">Load</button> <button class="btn btn-danger" data-snapshot-delete="${s.id}" type="button">Delete</button></li>`).join('')
+    : '<li class="empty-state">No snapshots yet. Create a first snapshot to unlock period-over-period reporting.</li>';
 }
 function renderComparisonSummary() {
-  if (!state.comparison) { dom.comparisonSummary.innerHTML = '<li>No comparison selected.</li>'; dom.comparisonBody.innerHTML = '<tr><td colspan="10">Select periods and run comparison.</td></tr>'; dom.modeIndicator.textContent = 'Mode: Live'; return; }
+  if (!state.comparison) {
+    dom.comparisonSummary.innerHTML = state.snapshots.length < 1
+      ? '<li class="empty-state">No snapshot history yet. Create one snapshot, then compare it with live data.</li>'
+      : '<li class="empty-state">No comparison selected. Choose periods above and click Run Comparison.</li>';
+    dom.comparisonBody.innerHTML = '<tr><td colspan="10">Select periods and run comparison.</td></tr>';
+    dom.modeIndicator.textContent = 'Mode: Live';
+    return;
+  }
   const s = state.comparison.summary;
   const pct = (v) => (v === null || !Number.isFinite(v) ? 'n/a' : `${v.toFixed(1)}%`);
   dom.comparisonSummary.innerHTML = [
@@ -427,12 +474,13 @@ function renderComparisonTable() {
   if (!state.comparison) return;
   let rows = [...state.comparison.rows];
   if (state.compareSearch) rows = rows.filter((r) => safeLower(r.name).includes(safeLower(state.compareSearch)));
-  if (state.compareMovementFilter === 'improved') rows = rows.filter((r) => r.improved);
-  if (state.compareMovementFilter === 'worsened') rows = rows.filter((r) => r.worsened);
-  if (state.compareMovementFilter === 'changed') rows = rows.filter((r) => r.oldClassification !== r.newClassification);
+  if (state.compareMovementFilter === 'improved') rows = rows.filter((r) => r.improved || r.movementType === 'new');
+  if (state.compareMovementFilter === 'worsened') rows = rows.filter((r) => r.worsened || r.movementType === 'removed');
+  if (state.compareMovementFilter === 'changed') rows = rows.filter((r) => r.classChanged);
   const k = state.csort.key; const dir = state.csort.dir === 'asc' ? 1 : -1;
   rows.sort((a, b) => (typeof a[k] === 'string' ? String(a[k]).localeCompare(String(b[k])) : toNumber(a[k]) - toNumber(b[k])) * dir);
-  dom.comparisonBody.innerHTML = rows.length ? rows.map((r) => `<tr><td>${r.name}</td><td>${r.oldClassification}</td><td>${r.newClassification}</td><td class="${r.priceChange >= 0 ? 'value-good' : 'value-bad'}">${fmtCurrency(r.priceChange)}</td><td class="${r.unitsChange >= 0 ? 'value-good' : 'value-bad'}">${fmtInt(r.unitsChange)}</td><td class="${r.revenueChange >= 0 ? 'value-good' : 'value-bad'}">${fmtCurrency(r.revenueChange)}</td><td class="${r.profitChange >= 0 ? 'value-good' : 'value-bad'}">${fmtCurrency(r.profitChange)}</td><td>${r.foodCostChange.toFixed(2)} pts</td><td><span class="movement-chip ${r.worsened ? 'movement-down' : 'movement-up'}">${r.movement}</span></td><td>${r.action} <span class="movement-chip">${r.severity}</span></td></tr>`).join('') : '<tr><td colspan="10">No comparable items for filters.</td></tr>';
+  const movementClass = (r) => (r.movementType === 'new' ? 'movement-new' : r.movementType === 'removed' ? 'movement-removed' : r.worsened ? 'movement-down' : 'movement-up');
+  dom.comparisonBody.innerHTML = rows.length ? rows.map((r) => `<tr><td>${r.name}</td><td>${r.oldClassification}</td><td>${r.newClassification}</td><td class="${r.priceChange >= 0 ? 'value-good' : 'value-bad'}">${fmtCurrency(r.priceChange)}</td><td class="${r.unitsChange >= 0 ? 'value-good' : 'value-bad'}">${fmtInt(r.unitsChange)}</td><td class="${r.revenueChange >= 0 ? 'value-good' : 'value-bad'}">${fmtCurrency(r.revenueChange)}</td><td class="${r.profitChange >= 0 ? 'value-good' : 'value-bad'}">${fmtCurrency(r.profitChange)}</td><td>${r.foodCostChange.toFixed(2)} pts</td><td><span class="movement-chip ${movementClass(r)}">${r.movement}</span></td><td>${r.action} <span class="movement-chip">${r.severity}</span></td></tr>`).join('') : '<tr><td colspan="10">No comparable items for filters.</td></tr>';
 }
 
 function recalcAndRender() {
@@ -482,6 +530,7 @@ function createSnapshot() {
   state.snapshots.unshift(snap); persistAll(); renderSnapshotSelectors(); renderSnapshotList();
   dom.snapshotName.value = ''; dom.snapshotPeriod.value = ''; dom.snapshotNotes.value = '';
   setInlineMessage(dom.snapshotFeedback, `Snapshot "${snap.name}" created.`, 'success');
+  renderDashboard();
 }
 function findPeriodBySelector(value) {
   if (value === 'live') {
@@ -511,12 +560,16 @@ function downloadCsv(filename, headers, rows) {
 }
 function exportCurrentCsv() {
   const items = state.menuEngine?.items || classifyMenuItems(state.recipes.map((r) => calculateRecipeMetrics(r, { suppressWarnings: true }))).items;
-  downloadCsv('menu-current-analysis.csv', ['name', 'classification', 'effectiveMenuPrice', 'unitsSold', 'revenue', 'grossProfitPerPortion', 'totalGrossProfit', 'foodCostPercent', 'action'], items.map((i) => ({ ...i, action: recommendedAction(i) })));
+  const period = cleanText(dom.fields.reportingPeriod.value) || 'Mixed';
+  downloadCsv('menu-current-analysis.csv',
+    ['periodLabel', 'name', 'category', 'classification', 'isActive', 'effectiveMenuPrice', 'roundedSellingPrice', 'unitsSold', 'revenue', 'grossProfitPerPortion', 'totalGrossProfit', 'foodCostPercent', 'flags', 'action', 'updatedAt'],
+    items.map((i) => ({ periodLabel: period, name: i.name, category: i.category, classification: i.classification, isActive: i.isActive, effectiveMenuPrice: i.effectiveMenuPrice.toFixed(2), roundedSellingPrice: i.roundedSellingPrice.toFixed(2), unitsSold: i.unitsSold, revenue: i.revenue.toFixed(2), grossProfitPerPortion: i.grossProfitPerPortion.toFixed(2), totalGrossProfit: i.totalGrossProfit.toFixed(2), foodCostPercent: i.foodCostPercent.toFixed(2), flags: getItemFlags(i).join(' | '), action: recommendedAction(i), updatedAt: i.updatedAt || '' })),
+  );
 }
 function exportComparisonCsv() {
   if (!state.comparison) return setInlineMessage(dom.snapshotFeedback, 'Run comparison before exporting.');
-  const rows = state.comparison.rows.map((r) => ({ name: r.name, oldClassification: r.oldClassification, newClassification: r.newClassification, priceChange: r.priceChange.toFixed(2), unitsChange: r.unitsChange, revenueChange: r.revenueChange.toFixed(2), profitChange: r.profitChange.toFixed(2), foodCostChange: r.foodCostChange.toFixed(2), movement: r.movement, severity: r.severity, action: r.action }));
-  downloadCsv('snapshot-comparison.csv', ['name', 'oldClassification', 'newClassification', 'priceChange', 'unitsChange', 'revenueChange', 'profitChange', 'foodCostChange', 'movement', 'severity', 'action'], rows);
+  const rows = state.comparison.rows.map((r) => ({ comparisonFrom: state.comparison.leftLabel, comparisonTo: state.comparison.rightLabel, name: r.name, oldClassification: r.oldClassification, newClassification: r.newClassification, movementType: r.movementType, priceChange: r.priceChange.toFixed(2), unitsChange: r.unitsChange, revenueChange: r.revenueChange.toFixed(2), profitChange: r.profitChange.toFixed(2), foodCostChange: r.foodCostChange.toFixed(2), movement: r.movement, severity: r.severity, action: r.action }));
+  downloadCsv('snapshot-comparison.csv', ['comparisonFrom', 'comparisonTo', 'name', 'oldClassification', 'newClassification', 'movementType', 'priceChange', 'unitsChange', 'revenueChange', 'profitChange', 'foodCostChange', 'movement', 'severity', 'action'], rows);
 }
 function reviewSummaryText() {
   const totals = totalsFromItems((state.menuEngine?.items || []).map((i) => ({ ...i, action: recommendedAction(i), flags: getItemFlags(i) })));
@@ -525,8 +578,12 @@ function reviewSummaryText() {
     `Active items: ${totals.activeItems} | Units: ${fmtInt(totals.totalUnits)} | Revenue: ${fmtCurrency(totals.totalRevenue)} | Gross Profit: ${fmtCurrency(totals.totalGrossProfit)}`,
     `Stars: ${totals.stars}, Plowhorses: ${totals.plowhorses}, Puzzles: ${totals.puzzles}, Dogs: ${totals.dogs}`,
   ];
+  const priorityPreview = dom.priorityList ? [...dom.priorityList.querySelectorAll('li')].slice(0, 5).map((li) => li.textContent.trim()) : [];
+  if (priorityPreview.length) lines.push(`Top priorities:\n- ${priorityPreview.join('\n- ')}`);
   if (state.comparison) lines.push(`Comparison: ${state.comparison.leftLabel} -> ${state.comparison.rightLabel}; Revenue delta ${fmtCurrency(state.comparison.summary.revenueDelta)}, GP delta ${fmtCurrency(state.comparison.summary.grossProfitDelta)}, Class changes ${state.comparison.summary.changedClasses}.`);
   if (state.comparison?.notes) lines.push(`Comparison notes: ${state.comparison.notes}`);
+  if (state.snapshots.length) lines.push(`Snapshot history: ${state.snapshots.length} total. Latest: ${state.snapshots.slice().sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))[0].name}.`);
+  else lines.push('Snapshot history: none yet.');
   return lines.join('\n');
 }
 
