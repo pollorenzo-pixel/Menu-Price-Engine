@@ -38,29 +38,63 @@
           <div id="home-kpi-cards" class="dashboard-cards home-kpis"></div>
         </section>
 
-        <section class="home-grid">
-          <div class="card dashboard-block">
-            <div class="panel-head"><h2>What needs attention</h2></div>
-            <ul id="home-attention-list" class="attention-list"></ul>
-          </div>
-          <div class="card dashboard-block">
-            <div class="panel-head"><h2>Next actions</h2></div>
-            <div class="button-row home-actions">
-              <button id="weekly-review-nav-btn" class="btn btn-accent" type="button">Start Weekly Review</button>
-              <button class="btn" data-open-mode="analysis" type="button">Open Menu Analysis</button>
-              <button class="btn" data-open-mode="analysis" type="button">Review Flagged Items</button>
-              <button class="btn" data-open-mode="reports" type="button">Open Reports</button>
-              <button id="new-recipe-btn" class="btn btn-secondary" type="button">New Recipe</button>
-              <button id="open-library-btn" class="btn" type="button">Edit Recipes / Ingredients</button>
-            </div>
-          </div>
-        </section>
 
-        <section class="card dashboard-block">
-          <div class="panel-head"><h2>Recent review and snapshot status</h2></div>
-          <ul id="home-summary-list" class="attention-list"></ul>
-        </section>
-      </section>
+      <section id="weekly-review-section" class="card dashboard-block weekly-review-block">
+        <div class="panel-head"><h2>Weekly Review Mode</h2><span id="weekly-review-status" class="count-pill">Not started</span></div>
+        <p class="helper-text weekly-intro">Run a full operator check-in: validate data, compare movement, choose focus items, make decisions, and close the loop on last week.</p>
+        <div class="weekly-step-indicator" id="weekly-step-indicator"></div>
+        <div id="weekly-review-feedback" class="inline-errors" aria-live="polite"></div>
+
+        <div class="weekly-step" data-weekly-step="1">
+          <h3>Step 1 — Start Review</h3>
+          <div class="field-grid two-col">
+            <label class="field"><span>Review Name</span><input id="weekly-review-name" type="text" /></label>
+            <label class="field"><span>Context (optional)</span><input id="weekly-review-notes" type="text" placeholder="Team notes, constraints, promo context..." /></label>
+          </div>
+          <div id="weekly-last-review" class="card-light"></div>
+          <div class="button-row"><button id="weekly-start-btn" class="btn btn-accent" type="button">Start Weekly Ritual</button></div>
+        </div>
+
+        <div class="weekly-step" data-weekly-step="2">
+          <h3>Step 2 — Data Check</h3>
+          <div id="weekly-data-check-list" class="weekly-data-check-list"></div>
+          <div class="button-row"><button id="weekly-continue-data-btn" class="btn" type="button">Continue to Snapshot</button></div>
+        </div>
+
+        <div class="weekly-step" data-weekly-step="3">
+          <h3>Step 3 — Snapshot</h3>
+          <p class="helper-text">Create a dedicated snapshot for this weekly review.</p>
+          <div class="button-row"><button id="weekly-create-snapshot-btn" class="btn btn-accent" type="button">Create Snapshot & Continue</button><button id="weekly-auto-snapshot-btn" class="btn btn-secondary" type="button">Auto-Create on Continue</button></div>
+        </div>
+
+        <div class="weekly-step" data-weekly-step="4">
+          <h3>Step 4 — Comparison</h3>
+          <div id="weekly-comparison-summary" class="card-light"></div>
+          <div class="field-grid two-col">
+            <label class="field"><span>What improved?</span><input id="weekly-improved-note" type="text" /></label>
+            <label class="field"><span>What declined?</span><input id="weekly-declined-note" type="text" /></label>
+          </div>
+          <label class="field"><span>Comparison Notes (optional)</span><input id="weekly-comparison-notes" type="text" /></label>
+          <div class="button-row"><button id="weekly-continue-comparison-btn" class="btn" type="button">Continue to Focus Items</button></div>
+        </div>
+
+        <div class="weekly-step" data-weekly-step="5">
+          <h3>Step 5 — Focus Item Selector</h3>
+          <div id="weekly-focus-list" class="weekly-focus-list"></div>
+          <div class="button-row"><button id="weekly-continue-focus-btn" class="btn" type="button">Continue to Decisions</button></div>
+        </div>
+
+        <div class="weekly-step" data-weekly-step="6">
+          <h3>Step 6 — Decision Panel</h3>
+          <div id="weekly-decisions-list" class="weekly-decisions-list"></div>
+          <div class="button-row"><button id="weekly-continue-decisions-btn" class="btn" type="button">Continue to Summary</button></div>
+        </div>
+
+        <div class="weekly-step" data-weekly-step="7">
+          <h3>Step 7 — Review Summary</h3>
+          <div id="weekly-summary-output" class="weekly-summary-output"></div>
+          <div class="button-row"><button id="weekly-continue-summary-btn" class="btn" type="button">Continue to Save</button></div>
+        </div>
 
       <section class="mode-panel" data-mode-panel="recipes">
         <main class="workspace-grid">
@@ -119,17 +153,11 @@
         </main>
       </section>
 
-      <section class="mode-panel" data-mode-panel="analysis">
-        <section class="card dashboard-block">
-          <div class="panel-head"><h2>Popularity vs Profitability Matrix</h2></div>
-          <div id="matrix-fallback" class="helper-text"></div>
-          <div id="matrix-chart" class="matrix-chart"></div>
-        </section>
-        <section class="card dashboard-block">
-          <div class="panel-head"><h2>Menu Engineering Table</h2></div>
-          <div class="analysis-controls"><label class="field"><span>Search</span><input id="analysis-search" type="search" /></label><label class="field"><span>Class filter</span><select id="analysis-class-filter"><option value="all">All</option><option value="Star">Star</option><option value="Plowhorse">Plowhorse</option><option value="Puzzle">Puzzle</option><option value="Dog">Dog</option><option value="Inactive">Inactive</option></select></label></div>
-          <div class="table-wrap"><table id="analysis-table"><thead><tr><th data-sort="name">Item</th><th data-sort="classification">Class</th><th data-sort="sellingPrice">Price</th><th data-sort="grossProfitPerPortion">GP/Portion</th><th data-sort="foodCostPercent">Food Cost %</th><th data-sort="unitsSold">Units</th><th data-sort="revenue">Revenue</th><th data-sort="totalGrossProfit">Total GP</th><th>Action</th></tr></thead><tbody id="analysis-body"></tbody></table></div>
-        </section>
+        <div class="weekly-step" data-weekly-step="9">
+          <h3>Step 9 — Previous Review Follow-up</h3>
+          <div id="weekly-evaluation-list" class="weekly-evaluation-list"></div>
+          <div class="button-row"><button id="weekly-finish-btn" class="btn" type="button">Finish Review Cycle</button></div>
+        </div>
       </section>
 
       <section class="mode-panel" data-mode-panel="reports">

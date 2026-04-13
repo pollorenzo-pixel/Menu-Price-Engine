@@ -1,82 +1,99 @@
-# Menu Price Engine — Mode-Based Stage 4 Workspace
+# Menu Price Engine — Stage 4 + Weekly Review Mode
 
-Menu Price Engine is a **static-file-only** restaurant costing and menu engineering app for **Kiju**.
+Menu Price Engine is a **static-file-only** internal app for Kiju covering costing, menu engineering, snapshots, reporting, and weekly operator decision workflows.
 
-This version refactors the interface into a **mode-based layout** so the app is no longer crowded into one long page.
+## Weekly Review Mode (Operator Ritual)
 
-## New Information Architecture
+Weekly Review Mode is designed as a guided founder/operator workflow, not a generic form.
 
-When the app opens, users now land on **Home / Command Center**.
+### End-to-end weekly flow
+1. **Start Review**
+   - Set review title and optional context notes.
+   - See a quick recap of the latest saved review.
+2. **Data Check**
+   - Clear scan of missing selling prices and missing units sold.
+   - Continue is allowed (with warnings) if gaps are expected.
+3. **Snapshot**
+   - Create a named review snapshot or auto-create one in-flow.
+4. **Comparison**
+   - Compare current live state vs latest snapshot.
+   - Capture what improved, what declined, and optional notes.
+5. **Focus Item Selection**
+   - Items grouped by **Stars / Plowhorses / Puzzles / Dogs**.
+   - Suggested picks are pre-marked for faster weekly selection.
+6. **Decision Entry**
+   - One card per selected item.
+   - Fast action choice + optional note.
+7. **Summary**
+   - Compact bullet summary suitable for internal team review.
+8. **Save Review**
+   - Saves the completed weekly review to localStorage.
+9. **Previous Review Follow-up**
+   - Evaluate last week’s decisions as:
+     - Worked
+     - Didn’t work
+     - Needs adjustment
 
-From Home, they can move into focused workspaces:
+## How reviews are saved
 
-1. **Home**
-2. **Recipes & Costing**
-3. **Menu Analysis**
-4. **Reports & Snapshots**
-5. **Weekly Review**
-6. **Ingredient Library**
+Reviews are stored in `localStorage` under:
+- `mpe_v4_weekly_reviews` (saved logs)
+- `mpe_v4_weekly_draft` (in-progress draft state)
 
-This keeps the first view calm and operationally focused, while preserving all Stage 4 capabilities.
+Each saved review includes:
+- `id`, `name`, `createdAt`
+- `snapshotId`
+- `decisions[]`
+- `selectedItems[]`
+- `notes` (start/improved/declined/comparison)
+- `previousEvaluation[]`
+- `summary`
 
-## Home / Command Center
+## Previous review evaluation behavior
 
-Home now prioritises:
+The follow-up step loads the **most recent saved review** and lets the operator score each prior decision outcome.
+Those outcomes are attached to the current weekly review record when saved.
 
-1. Key KPIs
-2. Urgent attention items
-3. Next action shortcuts
-4. Recent snapshot / review status
+## Mobile and responsiveness notes
 
-Home intentionally avoids showing every editor, matrix, and table at once.
+Weekly Review Mode is refined for phone use:
+- step navigation stays usable in stacked layout
+- cards stack vertically on narrow widths
+- primary action buttons become full-width tap targets
+- metrics and summaries wrap without overflow
+- tables elsewhere in app still use horizontal scrolling where needed
 
-## Mode Responsibilities
+## Stage 4 compatibility retained
 
-### 1) Recipes & Costing
-- recipe list + search/filter
-- recipe editor fields
-- ingredient rows
-- costing and pricing outputs
+All core Stage 4 capabilities remain intact:
+- ingredient library CRUD
+- recipe CRUD + duplication
+- costing and menu engineering classification
+- snapshots and snapshot comparisons
+- CSV exports + print summary
+- matrix and analysis tools
 
-### 2) Menu Analysis
-- popularity vs profitability matrix
-- menu engineering table
-- class/action analysis filters
+## Current limitations
 
-### 3) Reports & Snapshots
-- snapshot creation controls
-- period comparison controls
-- dashboard highlights + priorities
-- snapshot list and comparison table
-- CSV export + print summary + copy summary
+- Data persistence is browser-local only (`localStorage`), no sync across devices.
+- No user accounts or multi-user collaboration.
+- Weekly draft and saved reviews depend on browser storage availability.
+- Snapshot comparisons rely on available snapshot history.
 
-### 4) Weekly Review
-- full guided weekly ritual (Step 1–9)
-- focus selection
-- decision capture
-- saved review logs
+## Run locally
 
-### 5) Ingredient Library
-- add/edit/delete ingredients
-- supplier + notes management
-- ingredient usage visibility
-
-## What Stayed Compatible
-
-This refactor preserves:
-- existing calculation and classification logic
-- localStorage data model compatibility
-- Stage 4 comparison/reporting features
-- Weekly Review workflow
-- static deployment model
-- GitHub Pages compatibility
-
-## Running Locally
-
-Open `index.html` directly, or run:
+Open `index.html` directly, or serve with:
 
 ```bash
 python -m http.server 8000
 ```
 
-Then browse to `http://localhost:8000`.
+Then open `http://localhost:8000`.
+
+## Deployment
+
+GitHub Pages compatible without changes:
+- `index.html`
+- `style.css`
+- `script.js`
+- no backend, no build step, no external dependencies
