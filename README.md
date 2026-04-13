@@ -19,83 +19,57 @@ The app uses a strict three-level structure:
    - Can use raw ingredients, prep recipes, or both in one dish.
    - Commercial fields live only here.
 
-## New: Pricing Intelligence
+## Pricing Intelligence (refined)
 
-### Why this exists
-Traditional formula pricing (`portion cost / target food cost %`) is still useful, but not enough by itself for real menu decisions.
-
-Some dishes should be priced above formula because of labour burden, market expectation, perceived value, and strategic role (for example, wings, add-ons, drinks, signature items).
-
-Pricing Intelligence keeps formula pricing, then layers practical commercial logic on top.
+### What changed in this refinement pass
+- Final recommendations are now less formula-dominant and more context-led.
+- Margin Driver logic now protects contribution on low-cost, high-value items (for example wings).
+- Market-based inputs behave cleanly when range values are provided in either order.
+- Inputs in Dish editor are clearer and grouped into **Positioning** and **Market Anchors**.
+- Rationale and flags are shorter, more human, and capped to reduce noise.
+- Mobile presentation is cleaner with lower visual clutter in the Pricing Intelligence area.
 
 ### Dish-level Pricing Intelligence inputs
-Each Dish now includes:
+Each Dish includes:
 
 - `pricingStrategy`
-  - **Standard**: mostly cost-led, balanced
-  - **Market-Based**: stronger weight on market range
-  - **Margin Driver**: protects contribution and margin
-  - **Traffic Builder**: tighter strategic pricing with margin warnings
-  - **Premium Signature**: premium-friendly recommendation
+  - **Standard**: balanced
+  - **Market-Based**: stronger market pull
+  - **Margin Driver**: protects contribution
+  - **Traffic Builder**: tighter pricing with risk checks
+  - **Premium Signature**: supports premium positioning
 - `labourIntensity` (Low / Medium / High)
 - `perceivedValue` (Low / Medium / High)
 - `menuRole`
   - Core Main, Side / Add-On, Signature Item, Combo Driver, Traffic Builder, High Margin Support
-- Optional market range:
+- Optional market anchors:
   - `marketLowPrice`
   - `marketHighPrice`
-- Optional manual floor:
+- Optional hard floor:
   - `minimumAcceptablePrice`
 
-### Pricing Intelligence outputs
-For each dish, the app displays:
+### Pricing logic summary
+1. Build formula price from cost and target food cost.
+2. Apply strategic lift from labour, value, and menu role.
+3. Blend strategic premium + market pull on top of formula (instead of rigid weighted average).
+4. If market range exists, keep recommendation in a sensible corridor around that range.
+5. Apply floors (strategy floor, market-aware floor, operator minimum).
+6. Apply rounding rule.
 
-1. Portion cost
-2. Formula price
-3. Market-guided range
-4. Strategic recommended price
-5. Final recommended price (after floor checks + rounding)
-6. Food cost % at final recommendation
-7. Confidence score
-8. Pricing rationale
-9. Pricing flags
-
-### How final recommended price is derived
-
-1. **Formula price**
-   - `portion cost / (target food cost % / 100)`
-
-2. **Strategic lift layer**
-   - Labour intensity, perceived value, and menu role add transparent uplift.
-
-3. **Strategy weighting**
-   - Formula, market midpoint, and strategic uplift are blended differently by strategy type.
-
-4. **Market-guided behavior**
-   - If market range is provided, midpoint influences recommendation.
-   - Formula far below market triggers a rationale + flags.
-
-5. **Price floor logic**
-   - Final recommendation is constrained by applicable floors:
-     - formula protection (for selected strategies)
-     - market low (for market-aware strategies)
-     - operator minimum acceptable price
-     - internal strategic floor for stronger margin protection
-
-6. **Rounding**
-   - Existing rounding rule is applied at the end.
-
-## Smart business behavior included
-
-- Margin Driver avoids unrealistically low recommendations.
-- Traffic Builder can stay tighter but warns on weak margin.
-- High labour + high perceived value supports stronger pricing.
-- Very low food cost % is not treated as an error for margin/premium strategies.
-- Flags include market positioning and contribution risk/opportunity cues.
+### Outputs shown in Dish editor
+- Portion cost
+- Formula price
+- Market-guided range
+- Final recommended price
+- Food cost % at final
+- Confidence score
+- Gap vs current price
+- Short rationale bullets
+- Reduced, high-signal flags
 
 ## Migration safety
 
-Older Dish objects are safely normalized with defaults:
+Older Dish objects are normalized safely with defaults:
 
 - `pricingStrategy = Standard`
 - `labourIntensity = Medium`
@@ -105,14 +79,16 @@ Older Dish objects are safely normalized with defaults:
 - `marketHighPrice = null`
 - `minimumAcceptablePrice = null`
 
+Additionally, if legacy market values are reversed (`low > high`), they are corrected during normalization.
+
 Legacy mixed records continue to be split safely into Recipes vs Dishes.
 
 ## Sample data
 
 If localStorage is empty, sample data is auto-seeded to demonstrate Pricing Intelligence:
 
-- **Beer Battered Wings** (Margin Driver, high labour/high value, market-guided, significantly higher strategic recommendation)
-- **Grilled Chicken Bowl** (Standard strategy, closer formula vs final recommendation)
+- **Beer Battered Wings** (Margin Driver, high labour/high value, market-guided)
+- **Grilled Chicken Bowl** (Standard strategy)
 
 ## Deployment constraints
 
