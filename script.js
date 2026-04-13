@@ -98,15 +98,27 @@ const MODE_META = {
 
 function switchMode(mode) {
   if (!MODE_META[mode]) return;
+  if (state.currentMode === mode && dom.modePanels.some((panel) => panel.dataset.modePanel === mode && panel.classList.contains('active'))) return;
   state.currentMode = mode;
-  dom.modeTabs.forEach((tab) => tab.classList.toggle('active', tab.dataset.mode === mode));
+  dom.modeTabs.forEach((tab) => {
+    const isActive = tab.dataset.mode === mode;
+    tab.classList.toggle('active', isActive);
+    tab.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+    if (isActive) tab.setAttribute('aria-current', 'page');
+    else tab.removeAttribute('aria-current');
+  });
   dom.modePanels.forEach((panel) => {
     const isActive = panel.dataset.modePanel === mode;
     panel.classList.toggle('active', isActive);
     panel.hidden = !isActive;
+    panel.setAttribute('aria-hidden', isActive ? 'false' : 'true');
+    panel.inert = !isActive;
   });
+  dom.appShell.classList.toggle('home-mode', mode === 'home');
   dom.activeModeTitle.textContent = MODE_META[mode].title;
   dom.activeModeDescription.textContent = MODE_META[mode].description;
+  const compareSuffix = state.comparison ? ` · Comparison: ${state.comparison.leftLabel} → ${state.comparison.rightLabel}` : ' · Live';
+  dom.modeIndicator.textContent = `Mode: ${MODE_META[mode].title}${compareSuffix}`;
 }
 
 function bindModeEvents() {
@@ -543,7 +555,7 @@ function renderComparisonSummary() {
       ? '<li class="empty-state">No snapshot history yet. Create one snapshot, then compare it with live data.</li>'
       : '<li class="empty-state">No comparison selected. Choose periods above and click Run Comparison.</li>';
     dom.comparisonBody.innerHTML = '<tr><td colspan="10">Select periods and run comparison.</td></tr>';
-    dom.modeIndicator.textContent = 'Mode: Live';
+    if (MODE_META[state.currentMode]) dom.modeIndicator.textContent = `Mode: ${MODE_META[state.currentMode].title} · Live`;
     return;
   }
   const s = state.comparison.summary;
@@ -556,7 +568,7 @@ function renderComparisonSummary() {
     `Avg GP/portion: ${s.gpPerPortionDelta >= 0 ? '▲' : '▼'} ${fmtCurrency(s.gpPerPortionDelta)}`,
     `Class changes: ${s.changedClasses} · Improved: ${s.improved} · Worsened: ${s.worsened}`,
   ].map((x) => `<li>${x}</li>`).join('');
-  dom.modeIndicator.textContent = `Mode: Comparison (${state.comparison.leftLabel} → ${state.comparison.rightLabel})`;
+  if (MODE_META[state.currentMode]) dom.modeIndicator.textContent = `Mode: ${MODE_META[state.currentMode].title} · Comparison: ${state.comparison.leftLabel} → ${state.comparison.rightLabel}`;
   renderComparisonTable();
 }
 function renderComparisonTable() {
